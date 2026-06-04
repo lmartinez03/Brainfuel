@@ -1,0 +1,201 @@
+/**
+ * Brainfuel Games Engine: public API.
+ *
+ * Exposes the primary function: getQuiz({ category, count }) returning Question[]
+ *
+ * Questions are drawn from curated banks (memory, puzzles, riddles, sequences,
+ * wordplay) or generated procedurally (math). Both the question order AND the
+ * answer-choice order are shuffled on every call so the correct answer never
+ * sits in a predictable position.
+ *
+ * Usage:
+ *   import { getQuiz } from '@games/index';
+ *   const questions = getQuiz({ category: 'random', count: 3 });
+ */
+
+import { Question, GameCategory, GetQuizOptions, QuizCount } from './types';
+import { memoryQuestions } from './categories/memory';
+import { generateMathQuestions } from './categories/math';
+import { puzzlesQuestions } from './categories/puzzles';
+import { riddlesQuestions } from './categories/riddles';
+import { sequencesQuestions } from './categories/sequences';
+import { wordplayQuestions } from './categories/wordplay';
+
+// Re-export types so importers only need a single import path
+export type { Question, GameCategory, GetQuizOptions, QuizCount } from './types';
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/** Fisher-Yates shuffle. Returns a new shuffled array (does not mutate). */
+function shuffleArray<T>(arr: T[]): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+/**
+ * Shuffle the choices of a single question while keeping the answerIndex
+ * correctly pointing at the answer after the shuffle.
+ */
+function shuffleChoices(question: Question): Question {
+  const indexed = question.choices.map((choice, i) => ({
+    choice,
+    correct: i === question.answerIndex,
+  }));
+  const shuffled = shuffleArray(indexed);
+  const newAnswerIndex = shuffled.findIndex((item) => item.correct) as 0 | 1 | 2 | 3;
+  return {
+    ...question,
+    choices: shuffled.map((item) => item.choice) as [string, string, string, string],
+    answerIndex: newAnswerIndex,
+  };
+}
+
+/**
+ * Pick `count` unique questions from a bank, shuffle them, and shuffle each
+ * question's answer choices.
+ */
+function sampleFromBank(bank: Question[], count: number): Question[] {
+  if (bank.length === 0) return [];
+  const shuffledBank = shuffleArray(bank);
+  const picked = shuffledBank.slice(0, Math.min(count, shuffledBank.length));
+  return picked.map(shuffleChoices);
+}
+
+// ---------------------------------------------------------------------------
+// Category banks
+// ---------------------------------------------------------------------------
+
+/**
+ * All curated category banks keyed by category name.
+ * Math is excluded here because it is procedurally generated.
+ */
+const CURATED_BANKS: Record<Exclude<GameCategory, 'math' | 'random'>, Question[]> = {
+  memory: memoryQuestions,
+  puzzles: puzzlesQuestions,
+  riddles: riddlesQuestions,
+  sequences: sequencesQuestions,
+  wordplay: wordplayQuestions,
+};
+
+const CURATED_CATEGORY_NAMES = Object.keys(CURATED_BANKS) as Exclude<
+  GameCategory,
+  'math' | 'random'
+>[];
+
+const ALL_CATEGORY_NAMES: Exclude<GameCategory, 'random'>[] = [
+  ...CURATED_CATEGORY_NAMES,
+  'math',
+];
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * How many fresh math questions to fold into the 'random' mix pool. Roughly the
+ * size of one curated bank, so every category (math included) is represented
+ * about equally when questions are drawn at random.
+ */
+const RANDOM_MIX_MATH_COUNT = 30;
+
+/**
+ * Returns `count` shuffled questions for the requested category.
+ *
+ * - category 'random': mixes questions from EVERY category into one pool, so
+ *                      each question in the quiz can come from any category
+ * - category 'math': procedurally generates fresh questions every call
+ * - All other categories: sampled from the curated bank, shuffled
+ *
+ * Answer choices are also shuffled, so the correct answer is never in a
+ * predictable position. Use `question.answerIndex` to know which choice
+ * is correct after shuffling.
+ */
+export function getQuiz({ category, count }: GetQuizOptions): Question[] {
+  if (category === 'random') {
+    // True random mix: pool every curated bank together with a fresh batch of
+    // generated math questions, then draw `count` from the combined pool. This
+    // means a single quiz can span multiple categories (e.g. a riddle, then a
+    // math problem, then a memory question) rather than being locked to one.
+    const mixedPool: Question[] = [
+      ...CURATED_CATEGORY_NAMES.flatMap((c) => CURATED_BANKS[c]),
+      ...generateMathQuestions(RANDOM_MIX_MATH_COUNT, Date.now()),
+    ];
+    return sampleFromBank(mixedPool, count);
+  }
+
+  if (category === 'math') {
+    const generated = generateMathQuestions(count, Date.now());
+    return generated.map(shuffleChoices);
+  }
+
+  const bank = CURATED_BANKS[category as Exclude<GameCategory, 'math' | 'random'>];
+  return sampleFromBank(bank, count);
+}
+
+/**
+ * Returns all available non-random category names.
+ * Useful for populating the settings screen category picker.
+ */
+export function getAvailableCategories(): Exclude<GameCategory, 'random'>[] {
+  return [...ALL_CATEGORY_NAMES];
+}
+
+/**
+ * Returns the approximate question-pool size for a given category.
+ * For 'math' this returns Infinity because questions are procedurally generated.
+ */
+export function getCategoryPoolSize(category: Exclude<GameCategory, 'random'>): number {
+  if (category === 'math') return Infinity;
+  return CURATED_BANKS[category as Exclude<GameCategory, 'math' | 'random'>].length;
+}
+
+/**
+ * UI metadata for each category: labels, descriptions, and theme gradients.
+ * Used by the category picker and quiz screen header.
+ */
+export const CATEGORY_META: Record<
+  GameCategory,
+  { label: string; description: string; gradient: readonly [string, string] }
+> = {
+  memory: {
+    label: 'Memory',
+    description: 'Recall sequences, facts, and stories under time pressure',
+    gradient: ['#9B59F5', '#6B21D4'],
+  },
+  math: {
+    label: 'Mental Math',
+    description: 'Fresh arithmetic and number challenges every session',
+    gradient: ['#00F5FF', '#0077AA'],
+  },
+  puzzles: {
+    label: 'Puzzles',
+    description: 'Logic, spatial reasoning, and pattern recognition',
+    gradient: ['#FF6B35', '#CC3300'],
+  },
+  riddles: {
+    label: 'Riddles',
+    description: 'Lateral thinking and "aha!" insight challenges',
+    gradient: ['#FFD600', '#FF8C00'],
+  },
+  sequences: {
+    label: 'Sequences',
+    description: 'Find the rule in number and letter patterns',
+    gradient: ['#4ECDC4', '#006B5C'],
+  },
+  wordplay: {
+    label: 'Wordplay',
+    description: 'Anagrams, vocabulary, and verbal reasoning',
+    gradient: ['#FF4D8B', '#A00040'],
+  },
+  random: {
+    label: 'Random Mix',
+    description: 'All categories, maximum variety every time',
+    gradient: ['#FF4D6D', '#9B59F5'],
+  },
+};

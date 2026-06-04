@@ -1,0 +1,298 @@
+/**
+ * Sequences category: number series, letter patterns, and analogical chains.
+ *
+ * WHY SEQUENCES WORK:
+ * Identifying the hidden rule in a sequence activates fluid intelligence
+ * circuits, the same network measured by Raven's Progressive Matrices and
+ * Cattell's Culture Fair Test. Sequences require inductive reasoning: noticing
+ * a pattern from examples and projecting it forward. Research on fluid
+ * intelligence (Cattell, 1963; Blair, 2006) shows it is among the most
+ * general predictors of academic achievement and everyday problem-solving.
+ * Unlike crystallised knowledge (fixed facts), fluid intelligence responds to
+ * effortful practice, making sequences one of the most evidence-supported
+ * game types for cognitive benefit.
+ *
+ * CONTENT NOTE: All sequences are original. Number/letter patterns are
+ * mathematical constructs that cannot be copyrighted. Verbal analogies are
+ * written fresh.
+ */
+
+import { Question } from '../types';
+
+export const sequencesQuestions: Question[] = [
+  // ── Arithmetic sequences ──────────────────────────────────────────────────
+  {
+    id: 'seq-001',
+    category: 'sequences',
+    prompt: 'What comes next?\n2, 5, 8, 11, 14, ___',
+    choices: ['17', '16', '18', '15'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Add 3 each time. 14 + 3 = 17. Constant-difference (arithmetic) sequence.',
+  },
+  {
+    id: 'seq-002',
+    category: 'sequences',
+    prompt: 'What comes next?\n100, 92, 84, 76, 68, ___',
+    choices: ['60', '58', '62', '64'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Subtract 8 each time. 68 − 8 = 60.',
+  },
+  {
+    id: 'seq-003',
+    category: 'sequences',
+    prompt: 'What comes next?\n1, 3, 7, 15, 31, ___',
+    choices: ['63', '61', '62', '60'],
+    answerIndex: 0,
+    difficulty: 'medium',
+    explanation: 'Each term: double the previous and add 1. 31×2+1=63. Equivalent to 2ⁿ−1.',
+  },
+  {
+    id: 'seq-004',
+    category: 'sequences',
+    prompt: 'What is missing?\n4, 9, 16, 25, ___, 49',
+    choices: ['36', '32', '34', '38'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Perfect squares: 2²=4, 3²=9, 4²=16, 5²=25, 6²=36, 7²=49.',
+  },
+  {
+    id: 'seq-005',
+    category: 'sequences',
+    prompt: 'What comes next?\n1, 4, 9, 16, 25, ___',
+    choices: ['36', '30', '32', '35'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Squares of 1 to 6: 1,4,9,16,25,36.',
+  },
+  {
+    id: 'seq-006',
+    category: 'sequences',
+    prompt: 'Complete the sequence:\n0, 1, 1, 2, 3, 5, 8, ___',
+    choices: ['13', '11', '10', '14'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Fibonacci: each term = sum of previous two. 5+8=13.',
+  },
+  {
+    id: 'seq-007',
+    category: 'sequences',
+    prompt: 'What comes next?\n2, 6, 18, 54, 162, ___',
+    choices: ['486', '324', '500', '400'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Multiply by 3 each time (geometric sequence, ratio 3). 162×3=486.',
+  },
+  {
+    id: 'seq-008',
+    category: 'sequences',
+    prompt: 'Find the missing number:\n3, 6, 11, 18, 27, ___',
+    choices: ['38', '36', '40', '33'],
+    answerIndex: 0,
+    difficulty: 'medium',
+    explanation: 'Differences: +3, +5, +7, +9, +11 (odd increments). 27+11=38.',
+  },
+  {
+    id: 'seq-009',
+    category: 'sequences',
+    prompt: 'What comes next?\n1, 2, 6, 24, 120, ___',
+    choices: ['720', '240', '600', '480'],
+    answerIndex: 0,
+    difficulty: 'medium',
+    explanation: 'Factorials: 1!, 2!, 3!, 4!, 5! = 120, so next is 6! = 720.',
+  },
+  {
+    id: 'seq-010',
+    category: 'sequences',
+    prompt: 'Complete the pattern:\n2, 3, 5, 7, 11, 13, ___',
+    choices: ['17', '15', '14', '16'],
+    answerIndex: 0,
+    difficulty: 'medium',
+    explanation: 'Prime numbers in order. After 13 comes 17 (next prime).',
+  },
+  {
+    id: 'seq-011',
+    category: 'sequences',
+    prompt: 'What is the next number?\n1, 8, 27, 64, 125, ___',
+    choices: ['216', '196', '210', '250'],
+    answerIndex: 0,
+    difficulty: 'medium',
+    explanation: 'Cubes: 1³=1, 2³=8, 3³=27, 4³=64, 5³=125, 6³=216.',
+  },
+  {
+    id: 'seq-012',
+    category: 'sequences',
+    prompt: 'Find the missing term:\n5, 10, 20, ___, 80, 160',
+    choices: ['40', '30', '35', '45'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Geometric sequence, multiply by 2. 20×2=40.',
+  },
+
+  // ── Letter sequences ──────────────────────────────────────────────────────
+  {
+    id: 'seq-013',
+    category: 'sequences',
+    prompt: 'What comes next?\nA, C, E, G, I, ___',
+    choices: ['K', 'J', 'L', 'H'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Every other letter (odd positions): A,C,E,G,I,K.',
+  },
+  {
+    id: 'seq-014',
+    category: 'sequences',
+    prompt: 'What comes next?\nZ, X, V, T, R, ___',
+    choices: ['P', 'Q', 'O', 'N'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Every other letter in reverse alphabet. After R (skipping Q) comes P.',
+  },
+  {
+    id: 'seq-015',
+    category: 'sequences',
+    prompt: 'What is next in the sequence?\nAZ, BX, CV, DT, ___',
+    choices: ['ER', 'ES', 'EQ', 'FR'],
+    answerIndex: 0,
+    difficulty: 'medium',
+    explanation: 'First letters: A,B,C,D,E (forward). Second letters: Z,X,V,T,R (backward, step 2). Next: E + R = ER.',
+  },
+  {
+    id: 'seq-016',
+    category: 'sequences',
+    prompt: 'Complete the sequence:\nJ, F, M, A, M, J, ___',
+    choices: ['J', 'A', 'S', 'L'],
+    answerIndex: 0,
+    difficulty: 'medium',
+    explanation: 'First letters of months: January, February, March, April, May, June → July = J.',
+  },
+  {
+    id: 'seq-017',
+    category: 'sequences',
+    prompt: 'What letter is next?\nO, T, T, F, F, S, S, ___',
+    choices: ['E', 'N', 'O', 'S'],
+    answerIndex: 0,
+    difficulty: 'hard',
+    explanation: 'First letters of numbers: One, Two, Three, Four, Five, Six, Seven → Eight = E.',
+  },
+  {
+    id: 'seq-018',
+    category: 'sequences',
+    prompt: 'What comes next?\nS, M, T, W, T, F, ___',
+    choices: ['S', 'M', 'T', 'W'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'First letters of days: Sunday, Monday, Tuesday, Wednesday, Thursday, Friday → Saturday = S.',
+  },
+
+  // ── Mixed / relational sequences ──────────────────────────────────────────
+  {
+    id: 'seq-019',
+    category: 'sequences',
+    prompt: 'What comes next in this number-letter pattern?\n1A, 2B, 3C, 4D, ___',
+    choices: ['5E', '5F', '4E', '6E'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Number increments by 1, letter increments by 1 alphabetically. Next: 5E.',
+  },
+  {
+    id: 'seq-020',
+    category: 'sequences',
+    prompt: 'What is next?\n2A, 4C, 6E, 8G, ___',
+    choices: ['10I', '10H', '9I', '10J'],
+    answerIndex: 0,
+    difficulty: 'medium',
+    explanation: 'Numbers increase by 2 (2,4,6,8,10). Letters skip one: A,C,E,G,I. Next: 10I.',
+  },
+  {
+    id: 'seq-021',
+    category: 'sequences',
+    prompt: 'What is the missing value?\n1, 1, 2, 4, 7, 13, ___',
+    choices: ['24', '20', '26', '22'],
+    answerIndex: 0,
+    difficulty: 'hard',
+    explanation: 'Each term = sum of the three preceding: 4+7+13=24. A tribonacci-like sequence.',
+  },
+  {
+    id: 'seq-022',
+    category: 'sequences',
+    prompt: 'Shape sequence: △ △ □ △ △ □ △ △ ___',
+    choices: ['□', '△', '○', '△△'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Pattern repeats every 3: △ △ □. After two triangles comes a square.',
+  },
+  {
+    id: 'seq-023',
+    category: 'sequences',
+    prompt: 'Number analogy: 3 is to 9 as 5 is to ___',
+    choices: ['25', '15', '10', '20'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: '3² = 9. Applying the same rule: 5² = 25. Proportional analogical reasoning.',
+  },
+  {
+    id: 'seq-024',
+    category: 'sequences',
+    prompt: 'What comes next?\n8, 4, 2, 1, 0.5, ___',
+    choices: ['0.25', '0.5', '0.1', '0.3'],
+    answerIndex: 0,
+    difficulty: 'medium',
+    explanation: 'Divide by 2 each time (geometric, ratio ½). 0.5 ÷ 2 = 0.25.',
+  },
+  {
+    id: 'seq-025',
+    category: 'sequences',
+    prompt: 'What number completes the triangle?\n   3\n  5 7\n 9 11 13\n___ 17 19 21',
+    choices: ['15', '14', '16', '13'],
+    answerIndex: 0,
+    difficulty: 'medium',
+    explanation: 'Each row contains consecutive odd numbers. Row 4 starts at 15: 15, 17, 19, 21.',
+  },
+  {
+    id: 'seq-026',
+    category: 'sequences',
+    prompt: 'Analogy: 2 : 8 :: 3 : ___',
+    choices: ['27', '9', '18', '12'],
+    answerIndex: 0,
+    difficulty: 'medium',
+    explanation: '2³ = 8. So 3³ = 27. Identifying the cubic relationship requires relational reasoning.',
+  },
+  {
+    id: 'seq-027',
+    category: 'sequences',
+    prompt: 'What is the next term?\n−3, 1, 5, 9, 13, ___',
+    choices: ['17', '16', '18', '15'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Add 4 each time. 13 + 4 = 17. Arithmetic sequences with negative starting values.',
+  },
+  {
+    id: 'seq-028',
+    category: 'sequences',
+    prompt: 'Find the missing number:\n2, ___, 8, 16, 32, 64',
+    choices: ['4', '3', '6', '5'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Geometric sequence, multiply by 2. 2×2=4.',
+  },
+  {
+    id: 'seq-029',
+    category: 'sequences',
+    prompt: 'What comes next?\n10, 9, 7, 4, 0, ___',
+    choices: ['−5', '−4', '−3', '−6'],
+    answerIndex: 0,
+    difficulty: 'hard',
+    explanation: 'Differences: −1, −2, −3, −4, → −5. 0 + (−5) = −5. Increasing-difference decreasing sequence.',
+  },
+  {
+    id: 'seq-030',
+    category: 'sequences',
+    prompt: 'What word analogy completes the series?\nHot : Cold :: Light : ___',
+    choices: ['Dark', 'Heavy', 'Shadow', 'Dim'],
+    answerIndex: 0,
+    difficulty: 'easy',
+    explanation: 'Hot and Cold are antonyms. Light and Dark are antonyms. Verbal analogy by opposition.',
+  },
+];
