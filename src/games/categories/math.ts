@@ -23,9 +23,7 @@
 
 import { Question, Difficulty } from '../types';
 
-// ---------------------------------------------------------------------------
 // Tiny seeded PRNG (Mulberry32). No external dependency required.
-// ---------------------------------------------------------------------------
 function mulberry32(seed: number) {
   return function (): number {
     seed |= 0;
@@ -36,9 +34,7 @@ function mulberry32(seed: number) {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 function randInt(rng: () => number, min: number, max: number): number {
   return Math.floor(rng() * (max - min + 1)) + min;
 }
@@ -73,9 +69,7 @@ function intDistractors(answer: number, rng: () => number): number[] {
   return Array.from(distractors);
 }
 
-// ---------------------------------------------------------------------------
 // Question generators by difficulty tier
-// ---------------------------------------------------------------------------
 
 type Generator = (seed: number) => Question;
 
@@ -165,8 +159,8 @@ const mediumGenerators: Generator[] = [
     const rng = mulberry32(seed);
     const pcts = [10, 20, 25, 50, 75];
     const pct = pcts[randInt(rng, 0, pcts.length - 1)];
-    const base = randInt(rng, 2, 20) * 4; // always divisible
-    const answer = Math.round((pct / 100) * base);
+    const base = randInt(rng, 1, 10) * 20; // multiple of 20 so every pct is a whole number
+    const answer = (pct / 100) * base;
     const wrong = intDistractors(answer, rng);
     const allChoices = shuffle([answer, ...wrong], rng);
     const answerIndex = allChoices.indexOf(answer) as 0 | 1 | 2 | 3;
@@ -264,8 +258,8 @@ const hardGenerators: Generator[] = [
     const rng = mulberry32(seed);
     const pcts = [20, 25, 50];
     const pct = pcts[randInt(rng, 0, pcts.length - 1)];
-    const original = randInt(rng, 4, 20) * 10;
-    const partValue = Math.round((pct / 100) * original);
+    const original = randInt(rng, 2, 10) * 20; // multiple of 20 so every pct is a whole number
+    const partValue = (pct / 100) * original;
     const answer = original;
     const wrong = intDistractors(answer, rng);
     const allChoices = shuffle([answer, ...wrong], rng);
@@ -282,9 +276,7 @@ const hardGenerators: Generator[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
 // Public API: generate a batch of non-repeating math questions
-// ---------------------------------------------------------------------------
 
 /**
  * Generates `count` procedurally-created math questions. The `sessionSeed`

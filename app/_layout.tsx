@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, useRootNavigationState } from 'expo-router';
 import {
   useFonts,
   Nunito_400Regular,
@@ -8,18 +8,31 @@ import {
   Nunito_800ExtraBold,
   Nunito_900Black,
 } from '@expo-google-fonts/nunito';
+import {
+  Baloo2_700Bold,
+  Baloo2_800ExtraBold,
+} from '@expo-google-fonts/baloo-2';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import * as Linking from 'expo-linking';
-import { handleIncomingBlock, unlockApp } from '../src/services/blocking';
-import { pruneExpiredUnlockWindows } from '../src/services/storage';
+import {
+  isBlockingActive,
+  isQuizVisible,
+  isScreenTimeAuthorized,
+  refreshShieldConfig,
+  applyBlockGroups,
+} from '../src/services/screenTimeBlocking';
+import {
+  ensureNotificationPermission,
+  addNotificationTapListener,
+} from '../src/services/notifications';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const router = useRouter();
+  const rootNavState = useRootNavigationState();
 
   const [fontsLoaded, fontError] = useFonts({
     Nunito_400Regular,
@@ -27,6 +40,8 @@ export default function RootLayout() {
     Nunito_700Bold,
     Nunito_800ExtraBold,
     Nunito_900Black,
+    Baloo2_700Bold,
+    Baloo2_800ExtraBold,
   });
 
   useEffect(() => {
@@ -35,48 +50,43 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, fontError]);
 
-  // Clean up stale (expired) 15-min unlock windows once on launch.
+  // Push the latest shield button config on launch, so config changes apply
+  // after a reload without the user having to re-block. If a block is already
+  // active, make sure notification permission is in place so the shield's
+  // unlock notification can show.
   useEffect(() => {
-    pruneExpiredUnlockWindows();
+    refreshShieldConfig();
+    applyBlockGroups();
+    // If Screen Time is set up, make sure notifications are allowed so the
+    // shield's unlock button can post its notification.
+    if (isScreenTimeAuthorized()) ensureNotificationPermission();
   }, []);
 
-  // Handle deep links (brainfuel://block?app=instagram)
+  // The quiz opens ONLY when the user taps the shield's "unlock with a quiz"
+  // notification (or the in-app play button, which navigates on its own).
+  // Opening Brainfuel normally never forces a quiz. We still guard on an active
+  // block and the quiz not already showing so a stray tap cannot double-open it.
   useEffect(() => {
-    const handleUrl = async (event: { url: string }) => {
-      const result = await handleIncomingBlock(event.url);
-      if (!result) return;
-
-      if (result.alreadyUnlocked) {
-        // App is already in its 15-min unlock window. Bounce back immediately.
-        await unlockApp(result.appId);
-      } else {
-        // Need to show the quiz
-        router.push({
-          pathname: '/quiz',
-          params: { app: result.appId },
-        });
+    // Wait until the navigator is mounted before navigating, otherwise
+    // expo-router throws "attempted to navigate before mounting the Root Layout".
+    if (!rootNavState?.key) return;
+    return addNotificationTapListener(() => {
+      if (isBlockingActive() && !isQuizVisible()) {
+        router.push({ pathname: '/quiz', params: { app: 'blocked', mode: 'screentime' } });
       }
-    };
-
-    // Handle initial URL if app was launched via deep link
-    Linking.getInitialURL().then((url) => {
-      if (url) handleUrl({ url });
     });
-
-    const sub = Linking.addEventListener('url', handleUrl);
-    return () => sub.remove();
-  }, []);
+  }, [rootNavState?.key]);
 
   if (!fontsLoaded && !fontError) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <Stack
           screenOptions={{
             headerShown: false,
-            contentStyle: { backgroundColor: '#0D0F1A' },
+            contentStyle: { backgroundColor: '#ffbf57' },
             animation: 'slide_from_right',
           }}
         >
@@ -84,9 +94,10 @@ export default function RootLayout() {
           <Stack.Screen name="onboarding" />
           <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
           <Stack.Screen name="quiz" options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
-          <Stack.Screen name="shortcuts" />
-          <Stack.Screen name="real-blocking" />
-          <Stack.Screen name="paywall" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="block-group" options={{ animation: 'slide_from_bottom' }} />
+          {/* The paywall doubles as a mandatory gate, so it cannot be swiped
+              away. The close button only appears once the user is subscribed. */}
+          <Stack.Screen name="paywall" options={{ presentation: 'modal', gestureEnabled: false }} />
         </Stack>
       </SafeAreaProvider>
     </GestureHandlerRootView>

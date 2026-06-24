@@ -1,3 +1,4 @@
+// GameArt renders a distinct vector illustration for each quiz category, used on game cards and the quiz header.
 import React, { useId } from 'react';
 import Svg, {
   Defs,
@@ -11,14 +12,6 @@ import Svg, {
   Polygon,
   Text as SvgText,
 } from 'react-native-svg';
-
-/**
- * GameArt draws a distinct vector illustration for each game category, tinted
- * with that category's brand gradient. It scales cleanly at any size and runs
- * in Expo Go (react-native-svg ships with Expo Go), so there are no image files
- * to manage. Drop it on a game card, the quiz header, or anywhere a category
- * needs a picture.
- */
 
 export type GameArtCategory =
   | 'memory'

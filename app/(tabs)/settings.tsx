@@ -1,297 +1,350 @@
+/**
+ * You / Profile tab (app/(tabs)/settings.tsx)
+ *
+ * Matches design/BrainfuelRN/screens/ProfileScreen.tsx.
+ * Wired to real stats from src/services/storage.ts.
+ */
 import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   ScrollView,
+  Alert,
+  StyleSheet,
   Pressable,
-  Animated,
+  Linking,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
-import { Header } from '../../src/components/Header';
-import { GameCard } from '../../src/components/GameCard';
-import { colors, spacing, radius, shadow } from '../../src/theme';
-import { getSettings, saveSettings } from '../../src/services/storage';
-import { GameCategory, QuizCount } from '../../src/games/types';
-import { CATEGORY_META } from '../../src/games';
-import { CATEGORY_EMOJI, ALL_CATEGORIES } from '../../src/games/categoryMeta';
+import {
+  colors,
+  radius as R,
+  sticker,
+  fonts,
+  spacing,
+  Sticker,
+  Chip,
+  Mascot,
+} from '../../src/ui';
+import { getSettings, brainLevel, UserSettings } from '../../src/services/storage';
+import { ECONOMY_ENABLED, BADGES_ENABLED } from '../../src/config/featureFlags';
+import { getNotificationStatus, ensureNotificationPermission } from '../../src/services/notifications';
+import { restorePurchases } from '../../src/services/subscription';
+import { LEGAL_URLS } from '../../src/config/legal';
 
-const QUESTION_COUNTS: QuizCount[] = [1, 3, 5];
+// Badge definitions + unlock logic
+type BadgeDef = { em: string; nm: string; on: (s: UserSettings) => boolean };
 
-const COUNT_LABELS: Record<QuizCount, { label: string; sub: string; time: string }> = {
-  1: { label: '1 Question', sub: 'Quick', time: '~30s' },
-  3: { label: '3 Questions', sub: 'Balanced', time: '~90s' },
-  5: { label: '5 Questions', sub: 'Earn it', time: '~3min' },
-};
+const BADGE_DEFS: BadgeDef[] = [
+  { em: '🔥', nm: 'On a Roll',     on: (s) => s.totalUnlocks >= 10 },
+  { em: '🧠', nm: 'Brainiac',      on: (s) => s.gamesPlayed >= 20 },
+  { em: '⚡', nm: 'Quick Wit',     on: (s) => s.gamesPlayed >= 5 },
+  { em: '🎯', nm: 'Perfect Quiz',  on: (s) => s.totalUnlocks >= 1 },
+  { em: '🌙', nm: 'Night Owl',     on: (_s) => false },  // no time-of-day tracking yet
+  { em: '💎', nm: 'Centurion',     on: (s) => s.gamesPlayed >= 100 },
+];
 
-function CountOption({
-  count,
-  selected,
+const APP_VERSION = '1.0.0';
+
+// SettingsRow: sticker-style row with optional right element
+function SettingsRow({
+  label,
+  sub,
+  right,
   onPress,
 }: {
-  count: QuizCount;
-  selected: boolean;
-  onPress: () => void;
+  label: string;
+  sub?: string;
+  right?: React.ReactNode;
+  onPress?: () => void;
 }) {
-  const scale = React.useRef(new Animated.Value(1)).current;
-  const meta = COUNT_LABELS[count];
-
+  const Container: React.ElementType = onPress ? Pressable : View;
   return (
-    <Animated.View style={{ flex: 1, transform: [{ scale }] }}>
-      <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          Animated.sequence([
-            Animated.spring(scale, { toValue: 0.95, useNativeDriver: true, tension: 300, friction: 10 }),
-            Animated.spring(scale, { toValue: 1, useNativeDriver: true, tension: 200, friction: 12 }),
-          ]).start();
-          onPress();
-        }}
-        style={[styles.countBtn, selected && styles.countBtnSelected]}
+    <Sticker radius={R.md} offset={sticker.shadow.sm} innerStyle={styles.rowInner}>
+      <Container
+        style={styles.rowContent}
+        onPress={onPress}
+        android_ripple={null}
       >
-        {selected && (
-          <LinearGradient
-            colors={['rgba(0,245,255,0.15)', 'rgba(0,245,255,0.04)']}
-            style={StyleSheet.absoluteFillObject}
-          />
-        )}
-        <Text style={[styles.countNum, selected && styles.countNumSelected]}>{count}</Text>
-        <Text style={[styles.countLabel, selected && styles.countLabelSelected]}>{meta.sub}</Text>
-        <Text style={styles.countTime}>{meta.time}</Text>
-        {selected && <View style={styles.countCheck}><Text style={styles.countCheckText}>✓</Text></View>}
-      </Pressable>
-    </Animated.View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowLabel}>{label}</Text>
+          {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
+        </View>
+        {right !== undefined ? (
+          right
+        ) : onPress ? (
+          <Ionicons name="chevron-forward" size={18} color={colors.ink} />
+        ) : null}
+      </Container>
+    </Sticker>
   );
 }
 
-export default function GameSettingsScreen() {
+export default function YouScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [category, setCategory] = useState<GameCategory>('random');
-  const [questionCount, setQuestionCount] = useState<QuizCount>(3);
+
+  const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [notifsOn, setNotifsOn] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
-      getSettings().then((s) => {
-        setCategory(s.gameCategory);
-        setQuestionCount(s.questionCount);
-      });
+      getSettings().then(setSettings);
+      getNotificationStatus().then(setNotifsOn);
     }, [])
   );
 
-  const handleCategoryChange = async (cat: GameCategory) => {
-    Haptics.selectionAsync();
-    setCategory(cat);
-    await saveSettings({ gameCategory: cat });
+  // The same system permission the Blocked tab shows. Tapping requests it when
+  // off (or opens Settings if iOS will not re-prompt), and opens Settings to
+  // manage when on, since an app cannot revoke its own permission.
+  const handleNotifications = async () => {
+    if (notifsOn) {
+      Linking.openSettings();
+      return;
+    }
+    const ok = await ensureNotificationPermission();
+    setNotifsOn(ok);
+    if (!ok) Linking.openSettings();
   };
 
-  const handleCountChange = async (n: QuizCount) => {
-    setQuestionCount(n);
-    await saveSettings({ questionCount: n });
+  const handleRestorePurchases = async () => {
+    const result = await restorePurchases();
+    Alert.alert(
+      result.success ? 'Restored' : 'Restore Purchases',
+      result.success
+        ? 'Your subscription has been restored.'
+        : result.error ?? 'No previous purchase was found for this Apple ID.',
+    );
   };
 
-  const selectedMeta = CATEGORY_META[category];
-  const selectedEmoji = CATEGORY_EMOJI[category];
+  const handlePrivacy = () => {
+    Linking.openURL(LEGAL_URLS.privacy);
+  };
+
+  const handleTerms = () => {
+    Linking.openURL(LEGAL_URLS.terms);
+  };
+
+  // Derived values
+  const xp = settings?.xp ?? 0;
+  const { level } = brainLevel(xp);
+
+  const badges = BADGE_DEFS.map((b) => ({
+    em: b.em,
+    nm: b.nm,
+    on: settings ? b.on(settings) : false,
+  }));
+  const earnedCount = badges.filter((b) => b.on).length;
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <Header title="Game Settings" subtitle="Customize your quiz experience" />
-
+    <View style={styles.screen}>
       <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + 16 },
+        ]}
       >
-        {/* Question Count */}
-        <Text style={styles.sectionLabel}>Questions to Unlock</Text>
-        <Text style={styles.sectionSub}>How many questions must you answer to gain 15 minutes?</Text>
-        <View style={styles.countRow}>
-          {QUESTION_COUNTS.map((n) => (
-            <CountOption
-              key={n}
-              count={n}
-              selected={questionCount === n}
-              onPress={() => handleCountChange(n)}
-            />
-          ))}
+        {/* Avatar + identity */}
+        <View style={styles.hero}>
+          <Mascot size={120} expr="happy" />
+          <Text style={styles.name}>Guest</Text>
+          {ECONOMY_ENABLED && (
+            <View style={styles.chipRow}>
+              <Chip bg={colors.purple}>
+                <Text style={[styles.chipText, { color: colors.white }]}>
+                  Brain Lv {level}
+                </Text>
+              </Chip>
+            </View>
+          )}
         </View>
 
-        {/* Category */}
-        <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>Game Category</Text>
-        <Text style={styles.sectionSub}>Which type of brain challenge do you want?</Text>
+        {/* Badges (achievements, hidden for launch via BADGES_ENABLED) */}
+        {BADGES_ENABLED && (
+          <>
+            <View style={styles.secRow}>
+              <Text style={styles.secTitle}>Badges</Text>
+              <Text style={styles.secMore}>
+                {earnedCount} of {badges.length}
+              </Text>
+            </View>
+            <View style={styles.badgeGrid}>
+              {badges.map((b, i) => (
+                <Sticker
+                  key={i}
+                  radius={R.md}
+                  offset={sticker.shadow.sm}
+                  style={{ width: '31%' }}
+                  innerStyle={[styles.badge, !b.on && { opacity: 0.45 }]}
+                >
+                  <View
+                    style={[
+                      styles.badgeEmoji,
+                      { backgroundColor: b.on ? colors.yellow : '#e7ddd0' },
+                    ]}
+                  >
+                    <Text style={{ fontSize: 24 }}>{b.on ? b.em : '🔒'}</Text>
+                  </View>
+                  <Text style={styles.badgeLabel}>{b.nm}</Text>
+                </Sticker>
+              ))}
+            </View>
+          </>
+        )}
 
-        <View style={styles.cardsGrid}>
-          {ALL_CATEGORIES.map((cat) => {
-            const meta = CATEGORY_META[cat];
-            const emoji = CATEGORY_EMOJI[cat];
-            return (
-              <GameCard
-                key={cat}
-                title={meta.label}
-                emoji={emoji}
-                category={cat}
-                description={meta.description}
-                gradient={meta.gradient}
-                selected={category === cat}
-                onPress={() => handleCategoryChange(cat)}
-              />
-            );
-          })}
-        </View>
-
-        {/* Preview CTA */}
-        <Pressable
-          onPress={() => router.push({ pathname: '/quiz', params: { app: 'preview', demo: '1' } })}
-          style={styles.previewBtn}
-        >
-          <LinearGradient
-            colors={['#1C2035', '#151829']}
-            style={StyleSheet.absoluteFillObject}
+        {/* Settings rows */}
+        <Text style={styles.secTitle}>Settings</Text>
+        <View style={styles.rowStack}>
+          {/* Notifications (real iOS permission, matches the Blocked tab) */}
+          <SettingsRow
+            label="Notifications"
+            sub={notifsOn ? 'On' : 'Off, tap to turn on'}
+            onPress={handleNotifications}
           />
-          <View style={styles.previewLeft}>
-            <Text style={styles.previewTitle}>Preview Current Settings</Text>
-            <Text style={styles.previewSub}>
-              {questionCount} {selectedEmoji} {selectedMeta.label} question{questionCount > 1 ? 's' : ''}
-            </Text>
-          </View>
-          <View style={styles.previewArrow}>
-            <LinearGradient colors={colors.gradient.orange} style={StyleSheet.absoluteFillObject} />
-            <Ionicons name="play" size={14} color="#fff" />
-          </View>
-        </Pressable>
 
-        {/* Shortcuts Link */}
-        <Pressable onPress={() => router.push('/shortcuts')} style={styles.shortcutsLink}>
-          <Ionicons name="link" size={16} color={colors.brand.cyan} />
-          <Text style={styles.shortcutsLinkText}>Set up iOS Shortcuts automation →</Text>
-        </Pressable>
+          {/* Subscription */}
+          <SettingsRow
+            label="Brainfuel Pro"
+            sub="Manage subscription"
+            onPress={() => router.push('/paywall')}
+          />
 
-        <View style={{ height: 40 }} />
+          {/* Restore purchases */}
+          <SettingsRow
+            label="Restore purchases"
+            onPress={handleRestorePurchases}
+          />
+
+          {/* Privacy */}
+          <SettingsRow
+            label="Privacy Policy"
+            onPress={handlePrivacy}
+          />
+
+          {/* Terms */}
+          <SettingsRow
+            label="Terms of Service"
+            onPress={handleTerms}
+          />
+
+          {/* Version (no chevron, no press) */}
+          <SettingsRow
+            label="Version"
+            sub={APP_VERSION}
+            right={<View />}
+          />
+        </View>
       </ScrollView>
     </View>
   );
 }
 
+// Styles
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg.primary },
-  scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: spacing.base, paddingTop: spacing.base },
-  sectionLabel: {
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 18,
-    color: colors.text.primary,
-    marginBottom: 4,
+  screen: {
+    flex: 1,
+    backgroundColor: colors.bg,
   },
-  sectionSub: {
-    fontFamily: 'Nunito_400Regular',
-    fontSize: 13,
-    color: colors.text.secondary,
-    marginBottom: spacing.base,
-    lineHeight: 19,
+  content: {
+    paddingHorizontal: 18,
+    paddingBottom: 130,
+    gap: spacing.lg,
   },
-  countRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  countBtn: {
-    borderRadius: radius.xl,
-    padding: spacing.base,
+
+  // Hero
+  hero: {
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: colors.border.medium,
-    backgroundColor: colors.bg.card,
-    overflow: 'hidden',
-    position: 'relative',
-    minHeight: 100,
+    gap: 10,
+  },
+  name: {
+    fontWeight: fonts.weight.heading,
+    fontSize: 28,
+    color: colors.ink,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  chipText: {
+    fontWeight: fonts.weight.headingHeavy,
+    fontSize: 14,
+    color: colors.ink,
+  },
+
+  // Section header
+  secRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: -4,
+  },
+  secTitle: {
+    fontWeight: fonts.weight.heading,
+    fontSize: 17,
+    color: colors.ink,
+  },
+  secMore: {
+    fontWeight: fonts.weight.bodyHeavy,
+    fontSize: 12.5,
+    color: colors.ink,
+    opacity: 0.55,
+  },
+
+  // Badge grid
+  badgeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 12,
+  },
+  badge: {
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    gap: 6,
+  },
+  badgeEmoji: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 2.5,
+    borderColor: colors.ink,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  countBtnSelected: {
-    borderColor: colors.brand.cyan,
-    ...shadow.cyan,
-  },
-  countNum: {
-    fontFamily: 'Nunito_900Black',
-    fontSize: 32,
-    color: colors.text.secondary,
-    lineHeight: 38,
-  },
-  countNumSelected: { color: colors.brand.cyan },
-  countLabel: {
-    fontFamily: 'Nunito_700Bold',
+  badgeLabel: {
+    fontWeight: fonts.weight.headingHeavy,
     fontSize: 11,
-    color: colors.text.tertiary,
+    color: colors.ink,
     textAlign: 'center',
   },
-  countLabelSelected: { color: colors.brand.cyanDim },
-  countTime: {
-    fontFamily: 'Nunito_600SemiBold',
-    fontSize: 10,
-    color: colors.text.tertiary,
-    marginTop: 2,
+
+  // Settings rows
+  rowStack: {
+    gap: 10,
   },
-  countCheck: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.brand.cyan,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  countCheckText: {
-    fontSize: 11,
-    color: colors.text.inverse,
-    fontWeight: '900',
-  },
-  cardsGrid: { gap: spacing.sm },
-  previewBtn: {
-    marginTop: spacing.xl,
-    borderRadius: radius.xl,
+  rowInner: {
     overflow: 'hidden',
+  },
+  rowContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.base,
-    gap: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  previewLeft: { flex: 1 },
-  previewTitle: {
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 15,
-    color: colors.text.primary,
+  rowLabel: {
+    fontWeight: fonts.weight.heading,
+    fontSize: 16,
+    color: colors.ink,
   },
-  previewSub: {
-    fontFamily: 'Nunito_600SemiBold',
-    fontSize: 13,
-    color: colors.text.secondary,
+  rowSub: {
+    fontWeight: fonts.weight.body,
+    fontSize: 12,
+    color: colors.ink,
+    opacity: 0.6,
     marginTop: 2,
-  },
-  previewArrow: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shortcutsLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: spacing.xl,
-    paddingVertical: spacing.base,
-  },
-  shortcutsLinkText: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 14,
-    color: colors.brand.cyan,
   },
 });

@@ -47,12 +47,12 @@ export const puzzlesQuestions: Question[] = [
     id: 'puz-003',
     category: 'puzzles',
     prompt:
-      'Odd one out (shapes):\nCircle, Sphere, Square, Cube, Triangle',
-    choices: ['Sphere', 'Circle', 'Cube', 'Triangle'],
+      'Odd one out (shapes):\nCircle, Sphere, Square, Triangle, Pentagon',
+    choices: ['Sphere', 'Circle', 'Square', 'Pentagon'],
     answerIndex: 0,
     difficulty: 'medium',
     explanation:
-      'Circle, Square, and Triangle are 2D shapes. Cube is a 3D shape. Sphere is also 3D, but there are two 3D shapes. The real odd one out is Sphere because it is the only curved 3D shape. For a cleaner solve: Circle has a 3D counterpart (Sphere), Square has Cube, and Triangle has Pyramid, so Sphere is the only 3D shape that appears without its 2D counterpart in the list. Interpretations may vary. The key cognitive work is holding multiple classification rules simultaneously.',
+      'Circle, Square, Triangle, and Pentagon are all flat 2D shapes. Sphere is the only 3D shape, so it is the odd one out.',
   },
   {
     id: 'puz-004',
@@ -126,12 +126,12 @@ export const puzzlesQuestions: Question[] = [
     id: 'puz-010',
     category: 'puzzles',
     prompt:
-      'Five people sit in a row: Ana is to the left of Ben. Carlos is to the right of Ben. Dana is to the left of Ana. Eve is between Ana and Carlos.\nWho sits in the MIDDLE (3rd position)?',
+      'Five people sit in a row: Ana is to the left of Ben. Carlos is to the right of Ben. Dana is to the left of Ana. Eve sits immediately to the right of Ben.\nWho sits in the MIDDLE (3rd position)?',
     choices: ['Ben', 'Ana', 'Carlos', 'Eve'],
     answerIndex: 0,
     difficulty: 'hard',
     explanation:
-      'Order from constraints: Dana, Ana, Ben, Eve, Carlos. Middle position (3rd) is Ben. Spatial linear ordering is a challenging working-memory reasoning task.',
+      'The only order that fits every clue is Dana, Ana, Ben, Eve, Carlos. The middle (3rd) seat is Ben.',
   },
 
   // ── Pattern completion / sequences (non-numeric) ─────────────────────────
@@ -381,11 +381,11 @@ export const puzzlesQuestions: Question[] = [
     id: 'puz-032',
     category: 'puzzles',
     prompt:
-      'Logic grid: Exactly one of these statements is true.\n(A) This sentence is true.\n(B) Statement A is false.\n(C) Statement B is false.\n\nWhich statement is true?',
+      'Exactly one of these statements is true.\n(A) Statement A is true.\n(B) Statement A is false.\n(C) Statement B is false.\n\nWhich statement is the true one?',
     choices: ['C', 'A', 'B', 'None'],
-    answerIndex: 0,
+    answerIndex: 2,
     difficulty: 'hard',
     explanation:
-      'If A is true, then "A is true" which is consistent. But then B ("A is false") is false, and C ("B is false") is true, giving TWO true statements. Contradiction. If B is true ("A is false"), then A is false and C ("B is false") is false, leaving only one true statement. That works! Wait: if B is true, C says "B is false" which would be false, so only B is true. So B works too. But C says B is false, and if C is true, B is false, meaning A is true: contradiction. This is a genuine self-referential paradox used in advanced logic courses. The intended exercise is the reasoning process, not just the answer.',
+      'Test B: if B ("A is false") is true, then A is false (fine, since A only claims itself true) and C ("B is false") is false. That leaves exactly one true statement, B. Making A the true one or C the true one each forces a second statement to be true as well, breaking the "exactly one" rule. So the true statement is B.',
   },
 ];

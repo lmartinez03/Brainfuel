@@ -226,11 +226,11 @@ export const sequencesQuestions: Question[] = [
   {
     id: 'seq-023',
     category: 'sequences',
-    prompt: 'Number analogy: 3 is to 9 as 5 is to ___',
+    prompt: 'Each number is squared. If 3 gives 9, what does 5 give?',
     choices: ['25', '15', '10', '20'],
     answerIndex: 0,
     difficulty: 'easy',
-    explanation: '3² = 9. Applying the same rule: 5² = 25. Proportional analogical reasoning.',
+    explanation: '3² = 9, so by the same rule 5² = 25. (Tripling would give 15, which is why the rule is stated up front.)',
   },
   {
     id: 'seq-024',
@@ -253,11 +253,11 @@ export const sequencesQuestions: Question[] = [
   {
     id: 'seq-026',
     category: 'sequences',
-    prompt: 'Analogy: 2 : 8 :: 3 : ___',
+    prompt: 'Each number is cubed. If 2 gives 8, what does 3 give?',
     choices: ['27', '9', '18', '12'],
     answerIndex: 0,
     difficulty: 'medium',
-    explanation: '2³ = 8. So 3³ = 27. Identifying the cubic relationship requires relational reasoning.',
+    explanation: '2³ = 8, so by the same rule 3³ = 27. (Multiplying by 4 would give 12, which is why the rule is stated up front.)',
   },
   {
     id: 'seq-027',

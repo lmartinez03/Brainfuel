@@ -71,11 +71,11 @@ export const riddlesQuestions: Question[] = [
     category: 'riddles',
     prompt:
       'I am always in front of you but can never be seen. What am I?',
-    choices: ['The future', 'Your nose', 'Air', 'A mirror'],
+    choices: ['The future', 'Your nose', 'Your shadow', 'A mirror'],
     answerIndex: 0,
     difficulty: 'easy',
     explanation:
-      'The future is always ahead of you in time, but you cannot observe it directly.',
+      'The future is always ahead of you in time, but you cannot observe it directly. A nose, shadow, and mirror can all be seen.',
   },
   {
     id: 'rid-006',
@@ -201,12 +201,12 @@ export const riddlesQuestions: Question[] = [
     id: 'rid-016',
     category: 'riddles',
     prompt:
-      'What loses its head in the morning and gets it back at night?',
-    choices: ['A pillow', 'A candle', 'The sun', 'A shadow'],
+      'What do you take your head off of each morning and rest it back on each night?',
+    choices: ['A pillow', 'A hat', 'The sun', 'A shadow'],
     answerIndex: 0,
     difficulty: 'medium',
     explanation:
-      'A pillow: in the morning when you get up the pillowcase is off (you put your head on the pillow at night, placing your "head" back on it). Alternative: a candle loses its flame (head) in daylight and is lit again at night. Both interpretations are valid. Ambiguity is a feature of good riddles.',
+      'A pillow: you lift your head off it when you get up in the morning and rest your head back on it at night.',
   },
   {
     id: 'rid-017',
@@ -223,12 +223,12 @@ export const riddlesQuestions: Question[] = [
     id: 'rid-018',
     category: 'riddles',
     prompt:
-      'I have branches but no fruit, bark but no bite, leaves but no colour in winter. What am I?',
+      'I hold many titles but no nobility, I have spines but no backbone, and I stay silent yet I am full of voices. What am I?',
     choices: ['A library', 'A bank', 'A tree', 'A river'],
     answerIndex: 0,
     difficulty: 'medium',
     explanation:
-      '"Branches" (departments), "bark" (the counter/facade), "leaves" (pages): this could describe a library (book leaves, branches = library branches) or a bank (bank branches, etc.). The visual imagery of a tree is the misdirection. The intended answer is library: it has no fruit (edible), bark (sound), or coloured leaves in winter (closed pages).',
+      'A library holds titles (books), spines (book spines), and the voices of countless authors, yet it stays quiet. A bank, tree, and river fit none of those clues.',
   },
   {
     id: 'rid-019',
@@ -262,11 +262,11 @@ export const riddlesQuestions: Question[] = [
     category: 'riddles',
     prompt:
       'What do you throw out when you want to use it but take in when you don\'t?',
-    choices: ['An anchor', 'A boomerang', 'A kite', 'A fishing net'],
+    choices: ['An anchor', 'A boomerang', 'A dart', 'A javelin'],
     answerIndex: 0,
     difficulty: 'medium',
     explanation:
-      'An anchor: you throw it out (overboard) to hold the ship in place when you want to stay, and you pull it back in when you want to move (don\'t need it out anymore).',
+      'An anchor: you throw it overboard to use it (to hold the ship still) and pull it back in when you no longer need it. The other items are simply thrown, not deployed and retrieved this way.',
   },
   {
     id: 'rid-022',
@@ -342,9 +342,9 @@ export const riddlesQuestions: Question[] = [
     id: 'rid-027',
     category: 'riddles',
     prompt:
-      'A man is found dead in a field. He is surrounded by 53 unopened packages. What happened?',
+      'A man is found dead in an empty field with an unopened pack strapped to his back. What happened?',
     choices: [
-      'His parachute failed to open (the packages are the emergency chute that also failed)',
+      'His parachute failed to open',
       'He was buried alive',
       'He ordered too many deliveries',
       'He was struck by lightning',
@@ -352,7 +352,7 @@ export const riddlesQuestions: Question[] = [
     answerIndex: 0,
     difficulty: 'medium',
     explanation:
-      'The 53 "packages" are parachute packs. He jumped from a plane and neither his main nor backup chute opened. The word "packages" hides the parachute context, triggering the wrong mental model.',
+      'The "pack" is a parachute. He jumped from a plane and it never opened. The plain word "pack" hides the parachute, triggering the wrong mental model.',
   },
   {
     id: 'rid-028',
@@ -369,12 +369,12 @@ export const riddlesQuestions: Question[] = [
     id: 'rid-029',
     category: 'riddles',
     prompt:
-      'I always follow you but I never lead. I copy your every move but disappear when light fades. What am I?',
-    choices: ['Your shadow', 'Your reflection', 'Your echo', 'Your conscience'],
+      'I copy your every move and stretch or shrink with the light, but I vanish in the dark. What am I?',
+    choices: ['Your shadow', 'Your reflection', 'Your echo', 'Your twin'],
     answerIndex: 0,
     difficulty: 'easy',
     explanation:
-      'A shadow: it follows you (cast behind or around you by the sun), mimics your shape, and vanishes in darkness. Unlike a reflection, it requires a surface and disappears without light.',
+      'A shadow mimics your movements and changes size as the light moves, then disappears in darkness. A reflection does not stretch and shrink with the light the way a shadow does.',
   },
   {
     id: 'rid-030',

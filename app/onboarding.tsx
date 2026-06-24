@@ -4,52 +4,60 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Animated,
   Dimensions,
   Pressable,
+  StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
-import { PrimaryButton } from '../src/components/PrimaryButton';
-import { colors, spacing, radius } from '../src/theme';
+import {
+  colors,
+  radius,
+  spacing,
+  sticker,
+  fonts,
+  Sticker,
+  Button,
+  Chip,
+  Mascot,
+} from '../src/ui';
+import type { Expr } from '../src/ui';
 
 const { width: SW } = Dimensions.get('window');
 
-const SLIDES = [
+type Slide = {
+  mascotExpr: Expr;
+  chipLabel: string;
+  title: string;
+  body: string;
+};
+
+const SLIDES: Slide[] = [
   {
-    emoji: '🧠',
+    mascotExpr: 'happy',
+    chipLabel: 'Welcome',
     title: 'Meet Brainfuel',
-    subtitle: 'Your brain\'s personal trainer',
-    body: 'Stop mindlessly doom-scrolling. Every time you reach for a distracting app, Brainfuel challenges you to earn it.',
-    accent: colors.brand.cyan,
-    gradient: ['#0D0F1A', '#0D1F2D'] as const,
+    body: 'Stop mindlessly scrolling. Every time you reach for a distracting app, Brainfuel challenges you to earn it first.',
   },
   {
-    emoji: '⚡',
+    mascotExpr: 'excited',
+    chipLabel: 'Quiz to unlock',
     title: 'Earn Your Access',
-    subtitle: 'Quiz to unlock',
-    body: 'Answer 1, 3, or 5 brain-game questions. Nail them and you get 15 minutes of access. Fail and you\'re locked out. Your call.',
-    accent: colors.brand.orange,
-    gradient: ['#0D0F1A', '#1F120A'] as const,
+    body: 'Answer 3, 5, or 10 brain-game questions. Nail them and you get 15 minutes of access. Fail and you stay locked out. Your call.',
   },
   {
-    emoji: '🎮',
+    mascotExpr: 'thinking',
+    chipLabel: 'Memory, Math, Puzzles, Riddles',
     title: 'Stay Sharp',
-    subtitle: 'Memory · Math · Puzzles · Riddles',
-    body: 'Four categories of mind-bending challenges. Each quiz is randomized so you never coast on muscle memory.',
-    accent: colors.brand.purple,
-    gradient: ['#0D0F1A', '#170D2A'] as const,
+    body: 'Six categories of mind-bending challenges. Each quiz is randomized so you never coast on muscle memory.',
   },
   {
-    emoji: '🔗',
-    title: 'Powered by Shortcuts',
-    subtitle: 'iOS automation magic',
-    body: 'Set up a 1-minute iOS Shortcut automation. When you open Instagram, Brainfuel intercepts (just like one sec). We\'ll show you how.',
-    accent: colors.brand.green,
-    gradient: ['#0D0F1A', '#0A1F16'] as const,
+    mascotExpr: 'wow',
+    chipLabel: 'Powered by Apple Screen Time',
+    title: 'Real App Blocking',
+    body: 'Brainfuel uses Apple Screen Time to truly block your chosen apps. Open one and a shield appears. Pass a quick brain quiz to unlock 15 minutes.',
   },
 ];
 
@@ -58,6 +66,7 @@ export default function Onboarding() {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const [currentIdx, setCurrentIdx] = useState(0);
+
   const handleScroll = (e: any) => {
     const idx = Math.round(e.nativeEvent.contentOffset.x / SW);
     if (idx !== currentIdx) {
@@ -76,23 +85,22 @@ export default function Onboarding() {
 
   const handleComplete = async () => {
     await AsyncStorage.setItem('brainfuel_onboarded', 'true');
-    router.replace('/(tabs)');
+    // A subscription is mandatory, so onboarding leads into the paywall. The
+    // entry screen sends already-subscribed users straight to the tabs.
+    router.replace('/paywall');
   };
 
-  const slide = SLIDES[currentIdx];
+  const isLast = currentIdx === SLIDES.length - 1;
 
   return (
-    <View style={[styles.container, { paddingBottom: insets.bottom }]}>
-      <LinearGradient
-        colors={slide.gradient}
-        style={StyleSheet.absoluteFillObject}
-      />
+    <View style={[styles.screen, { paddingBottom: insets.bottom }]}>
+      <StatusBar barStyle="dark-content" />
 
-      {/* Skip */}
-      {currentIdx < SLIDES.length - 1 && (
+      {/* Skip button */}
+      {!isLast && (
         <Pressable
           onPress={handleComplete}
-          style={[styles.skipBtn, { top: insets.top + 16 }]}
+          style={[styles.skipBtn, { top: insets.top + 14 }]}
         >
           <Text style={styles.skipText}>Skip</Text>
         </Pressable>
@@ -106,22 +114,32 @@ export default function Onboarding() {
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={handleScroll}
         scrollEventThrottle={16}
-        style={styles.scroll}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingTop: insets.top + 56 }}
       >
         {SLIDES.map((s, i) => (
           <View key={i} style={[styles.slide, { width: SW }]}>
-            {/* Floating emoji orb */}
-            <View style={[styles.emojiOrb, { borderColor: `${s.accent}40`, shadowColor: s.accent }]}>
-              <LinearGradient
-                colors={[`${s.accent}22`, `${s.accent}06`]}
-                style={StyleSheet.absoluteFillObject}
-              />
-              <Text style={styles.slideEmoji}>{s.emoji}</Text>
-            </View>
+            {/* Mascot */}
+            <Mascot size={130} expr={s.mascotExpr} style={styles.mascot} />
 
-            <Text style={[styles.slideSubtitle, { color: s.accent }]}>{s.subtitle}</Text>
-            <Text style={styles.slideTitle}>{s.title}</Text>
-            <Text style={styles.slideBody}>{s.body}</Text>
+            {/* Chip subtitle */}
+            <Chip bg={colors.yellow} style={styles.chip}>
+              <Text style={styles.chipText}>{s.chipLabel}</Text>
+            </Chip>
+
+            {/* Heading */}
+            <Text style={styles.title}>{s.title}</Text>
+
+            {/* Body in a paper sticker card */}
+            <Sticker
+              bg={colors.paper}
+              radius={radius.xl}
+              offset={sticker.shadow.md}
+              style={styles.bodyCard}
+              innerStyle={styles.bodyCardInner}
+            >
+              <Text style={styles.body}>{s.body}</Text>
+            </Sticker>
           </View>
         ))}
       </ScrollView>
@@ -129,26 +147,27 @@ export default function Onboarding() {
       {/* Dots */}
       <View style={styles.dots}>
         {SLIDES.map((_, i) => (
-          <Animated.View
+          <View
             key={i}
             style={[
               styles.dot,
-              i === currentIdx && [styles.dotActive, { backgroundColor: slide.accent }],
+              i === currentIdx ? styles.dotActive : styles.dotInactive,
             ]}
           />
         ))}
       </View>
 
       {/* CTA */}
-      <View style={styles.cta}>
-        <PrimaryButton
-          label={currentIdx === SLIDES.length - 1 ? 'Get Started 🚀' : 'Next →'}
+      <View style={[styles.cta, { paddingHorizontal: 20 }]}>
+        <Button
+          variant="coral"
+          lg
+          block
+          label={isLast ? 'Get started' : 'Next'}
           onPress={goNext}
-          variant={currentIdx === SLIDES.length - 1 ? 'green' : 'cyan'}
-          size="lg"
         />
-        {currentIdx === SLIDES.length - 1 && (
-          <Text style={styles.trialNote}>3-day free trial · Cancel anytime</Text>
+        {isLast && (
+          <Text style={styles.trialNote}>3 day free trial, cancel anytime</Text>
         )}
       </View>
     </View>
@@ -156,100 +175,114 @@ export default function Onboarding() {
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
-    backgroundColor: colors.bg.primary,
+    backgroundColor: colors.bg,
   },
+
+  // Skip
   skipBtn: {
     position: 'absolute',
-    right: spacing.lg,
+    right: 20,
     zIndex: 10,
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.bg.card,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: colors.paper,
     borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border.medium,
+    borderWidth: 2.5,
+    borderColor: colors.ink,
+    // hard offset shadow
+    shadowColor: colors.ink,
+    shadowOffset: { width: 2, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 3,
   },
   skipText: {
-    fontFamily: 'Nunito_600SemiBold',
+    fontFamily: fonts.body,
     fontSize: 13,
-    color: colors.text.secondary,
+    color: colors.ink,
   },
-  scroll: {
-    flex: 1,
-  },
+
+  // Slide
   slide: {
-    flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xxl,
-    paddingTop: 60,
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    gap: spacing.md,
   },
-  emojiOrb: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    marginBottom: spacing.xxl,
-    overflow: 'hidden',
-    shadowOpacity: 0.5,
-    shadowRadius: 30,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 10,
+  mascot: {
+    marginBottom: 4,
   },
-  slideEmoji: {
-    fontSize: 64,
+
+  // Chip
+  chip: {
+    alignSelf: 'center',
   },
-  slideSubtitle: {
-    fontFamily: 'Nunito_700Bold',
+  chipText: {
+    fontFamily: fonts.body,
     fontSize: 13,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginBottom: spacing.sm,
+    color: colors.ink,
   },
-  slideTitle: {
-    fontFamily: 'Nunito_900Black',
+
+  // Heading
+  title: {
+    fontFamily: fonts.heading,
     fontSize: 36,
-    color: colors.text.primary,
+    color: colors.ink,
     textAlign: 'center',
-    letterSpacing: -0.8,
-    marginBottom: spacing.base,
+    lineHeight: 42,
   },
-  slideBody: {
-    fontFamily: 'Nunito_400Regular',
+
+  // Body card
+  bodyCard: {
+    width: '100%',
+    marginTop: 4,
+  },
+  bodyCardInner: {
+    padding: 20,
+  },
+  body: {
+    fontFamily: fonts.bodyRegular,
     fontSize: 16,
-    color: colors.text.secondary,
+    color: colors.ink,
     textAlign: 'center',
     lineHeight: 26,
+    opacity: 0.85,
   },
+
+  // Dots
   dots: {
     flexDirection: 'row',
     justifyContent: 'center',
+    alignItems: 'center',
     gap: 8,
-    marginBottom: spacing.xl,
+    marginVertical: 20,
   },
   dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.border.medium,
+    height: 9,
+    borderRadius: radius.pill,
   },
   dotActive: {
-    width: 24,
-    borderRadius: 4,
+    width: 26,
+    backgroundColor: colors.ink,
   },
+  dotInactive: {
+    width: 9,
+    backgroundColor: colors.ink,
+    opacity: 0.22,
+  },
+
+  // CTA
   cta: {
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.lg,
-    gap: spacing.sm,
+    gap: 10,
+    paddingBottom: 18,
   },
   trialNote: {
-    fontFamily: 'Nunito_400Regular',
+    fontFamily: fonts.bodyRegular,
     fontSize: 13,
-    color: colors.text.tertiary,
+    color: colors.ink,
+    opacity: 0.6,
     textAlign: 'center',
   },
 });

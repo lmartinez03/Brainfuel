@@ -19,6 +19,14 @@ export interface Question {
   id: string;
   /** Which category this question belongs to. */
   category: Exclude<GameCategory, 'random'>;
+  /**
+   * Optional information the user must hold in memory to answer. When present,
+   * the quiz shows it first behind a "ready" gate, then HIDES it before
+   * revealing the question and choices, so a recall answer cannot be looked up
+   * while answering. Use it for any question whose answer is sitting in the
+   * text the user would otherwise keep on screen.
+   */
+  memorize?: string;
   /** The question text shown to the user. */
   prompt: string;
   /** Four answer choices (A to D). Always exactly 4. */
@@ -30,7 +38,7 @@ export interface Question {
   explanation?: string;
 }
 
-export type QuizCount = 1 | 3 | 5;
+export type QuizCount = 3 | 5 | 10;
 
 export interface GetQuizOptions {
   category: GameCategory;

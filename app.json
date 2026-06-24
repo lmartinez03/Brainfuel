@@ -5,15 +5,18 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "scheme": "brainfuel",
+    "scheme": ["brainfuel", "device-activity"],
     "userInterfaceStyle": "dark",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.brainfuel.app",
       "appleTeamId": "SZW9Q2A567",
       "infoPlist": {
         "NSCameraUsageDescription": "Not required",
+        "ITSAppUsesNonExemptEncryption": false,
         "LSApplicationQueriesSchemes": [
           "instagram",
           "tiktok",
@@ -46,8 +49,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0D0F1A"
+        "foregroundImage": "./assets/Mascot.png",
+        "backgroundColor": "#ffbf57"
       },
       "package": "com.brainfuel.app"
     },
@@ -62,8 +65,8 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash.png",
-          "backgroundColor": "#0D0F1A",
+          "image": "./assets/Mascot.png",
+          "backgroundColor": "#ffbf57",
           "imageWidth": 220
         }
       ],
@@ -81,10 +84,56 @@
           "appleTeamId": "SZW9Q2A567",
           "appGroup": "group.com.brainfuel.app"
         }
-      ]
+      ],
+      "react-native-iap"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "bundleIdentifier": "com.brainfuel.app.ShieldConfiguration",
+                  "targetName": "ShieldConfiguration",
+                  "entitlements": {
+                    "com.apple.developer.family-controls": true,
+                    "com.apple.security.application-groups": [
+                      "group.com.brainfuel.app"
+                    ]
+                  }
+                },
+                {
+                  "bundleIdentifier": "com.brainfuel.app.ShieldAction",
+                  "targetName": "ShieldAction",
+                  "entitlements": {
+                    "com.apple.developer.family-controls": true,
+                    "com.apple.security.application-groups": [
+                      "group.com.brainfuel.app"
+                    ]
+                  }
+                },
+                {
+                  "bundleIdentifier": "com.brainfuel.app.ActivityMonitorExtension",
+                  "targetName": "ActivityMonitorExtension",
+                  "entitlements": {
+                    "com.apple.developer.family-controls": true,
+                    "com.apple.security.application-groups": [
+                      "group.com.brainfuel.app"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "projectId": "eb6dd908-b913-4626-bf2d-701a42f863ff"
+      }
+    },
+    "owner": "lucafmartinez"
   }
 }

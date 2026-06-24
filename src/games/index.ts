@@ -13,8 +13,9 @@
  *   const questions = getQuiz({ category: 'random', count: 3 });
  */
 
-import { Question, GameCategory, GetQuizOptions, QuizCount } from './types';
+import { Question, GameCategory, GetQuizOptions } from './types';
 import { memoryQuestions } from './categories/memory';
+import { generateMemoryQuestions } from './categories/memoryGenerated';
 import { generateMathQuestions } from './categories/math';
 import { puzzlesQuestions } from './categories/puzzles';
 import { riddlesQuestions } from './categories/riddles';
@@ -24,9 +25,25 @@ import { wordplayQuestions } from './categories/wordplay';
 // Re-export types so importers only need a single import path
 export type { Question, GameCategory, GetQuizOptions, QuizCount } from './types';
 
-// ---------------------------------------------------------------------------
 // Internal helpers
-// ---------------------------------------------------------------------------
+
+/**
+ * Dev-only guard: a question must have four DISTINCT choices and an in-range
+ * answerIndex. Duplicate choices break answer matching (the engine matches by
+ * index, so an identical distractor reads as wrong when tapped). Logs loudly in
+ * development; does nothing in production.
+ */
+function validateQuestions(questions: Question[]): void {
+  if (typeof __DEV__ === 'undefined' || !__DEV__) return;
+  for (const q of questions) {
+    if (new Set(q.choices).size !== q.choices.length) {
+      console.warn(`[games] ${q.id} has duplicate choices:`, q.choices);
+    }
+    if (q.answerIndex < 0 || q.answerIndex > 3) {
+      console.warn(`[games] ${q.id} has an out-of-range answerIndex:`, q.answerIndex);
+    }
+  }
+}
 
 /** Fisher-Yates shuffle. Returns a new shuffled array (does not mutate). */
 function shuffleArray<T>(arr: T[]): T[] {
@@ -67,9 +84,7 @@ function sampleFromBank(bank: Question[], count: number): Question[] {
   return picked.map(shuffleChoices);
 }
 
-// ---------------------------------------------------------------------------
 // Category banks
-// ---------------------------------------------------------------------------
 
 /**
  * All curated category banks keyed by category name.
@@ -93,9 +108,7 @@ const ALL_CATEGORY_NAMES: Exclude<GameCategory, 'random'>[] = [
   'math',
 ];
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 /**
  * How many fresh math questions to fold into the 'random' mix pool. Roughly the
@@ -117,25 +130,37 @@ const RANDOM_MIX_MATH_COUNT = 30;
  * is correct after shuffling.
  */
 export function getQuiz({ category, count }: GetQuizOptions): Question[] {
+  const seed = Date.now();
+  let result: Question[];
+
   if (category === 'random') {
-    // True random mix: pool every curated bank together with a fresh batch of
-    // generated math questions, then draw `count` from the combined pool. This
-    // means a single quiz can span multiple categories (e.g. a riddle, then a
-    // math problem, then a memory question) rather than being locked to one.
+    // True random mix: pool every curated bank together with fresh batches of
+    // generated math AND memory questions, then draw `count` from the combined
+    // pool. A single quiz can span multiple categories.
     const mixedPool: Question[] = [
       ...CURATED_CATEGORY_NAMES.flatMap((c) => CURATED_BANKS[c]),
-      ...generateMathQuestions(RANDOM_MIX_MATH_COUNT, Date.now()),
+      ...generateMathQuestions(RANDOM_MIX_MATH_COUNT, seed),
+      ...generateMemoryQuestions(RANDOM_MIX_MATH_COUNT, seed),
     ];
-    return sampleFromBank(mixedPool, count);
+    result = sampleFromBank(mixedPool, count);
+  } else if (category === 'math') {
+    result = generateMathQuestions(count, seed).map(shuffleChoices);
+  } else if (category === 'memory') {
+    // Memory leans on fresh, randomised questions (randomised items AND target)
+    // so the answers cannot be memorised, with a few curated questions mixed in
+    // for variety (stories, patterns, logic).
+    const pool: Question[] = [
+      ...generateMemoryQuestions(count + 3, seed),
+      ...shuffleArray(memoryQuestions).slice(0, 3),
+    ];
+    result = sampleFromBank(pool, count);
+  } else {
+    const bank = CURATED_BANKS[category as Exclude<GameCategory, 'math' | 'random'>];
+    result = sampleFromBank(bank, count);
   }
 
-  if (category === 'math') {
-    const generated = generateMathQuestions(count, Date.now());
-    return generated.map(shuffleChoices);
-  }
-
-  const bank = CURATED_BANKS[category as Exclude<GameCategory, 'math' | 'random'>];
-  return sampleFromBank(bank, count);
+  validateQuestions(result);
+  return result;
 }
 
 /**

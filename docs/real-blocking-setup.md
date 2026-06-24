@@ -61,9 +61,17 @@ For each:
    `group.com.brainfuel.app`) and check **Family Controls**.
 4. Register.
 
-### Step 4: Submit the Family Controls request form (4 times)
-Form: developer.apple.com/contact/request/family-controls-distribution (signed in).
-Submit it **once per bundle ID** (same Apple ID, different bundle ID each time).
+### Step 4: Get the Family Controls entitlement
+Go to developer.apple.com/contact/request/family-controls-distribution (signed in).
+
+As of 2026 Apple grants this as a self-service, account-level entitlement: there
+is a single **Get entitlement** button, no form and no multi-week review. Clicking
+it assigns **Family Controls (Distribution)** to your whole account instantly
+(confirmed by an email from Apple Developer Relations). It then applies to all your
+eligible App IDs, so you do NOT submit one request per bundle ID anymore.
+
+(The older process below is kept for reference in case Apple reverts: a form at the
+same URL, submitted once per bundle ID, with a review that took days to weeks.)
 
 What it asks and what to put:
 - Your name, email, and team (auto-filled).

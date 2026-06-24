@@ -1,439 +1,332 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Animated,
-  RefreshControl,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+/**
+ * Home tab, rebuilt to match design/BrainfuelRN/screens/HomeScreen.tsx.
+ * Wired to real data from getSettings() and isBlockingActive().
+ * Reloads on every tab focus via useFocusEffect.
+ */
+import React, { useCallback, useState } from 'react';
+import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { StatCard } from '../../src/components/StatCard';
-import { PrimaryButton } from '../../src/components/PrimaryButton';
-import { colors, spacing, radius, shadow } from '../../src/theme';
-import { getSettings, UserSettings } from '../../src/services/storage';
-import { CATEGORY_META } from '../../src/games';
-import { CATEGORY_EMOJI } from '../../src/games/categoryMeta';
+import {
+  colors,
+  radius as R,
+  sticker,
+  fonts,
+  spacing,
+  Sticker,
+  Button,
+  TopBar,
+  Mascot,
+  Bubble,
+} from '../../src/ui';
+import {
+  getSettings,
+  getWeeklyActivity,
+  getActivityTrend,
+  UserSettings,
+  DayStat,
+  ActivityTrend,
+} from '../../src/services/storage';
+import { isBlockingActive } from '../../src/services/screenTimeBlocking';
+import { getBlockGroups } from '../../src/services/blockGroups';
 
-const BLOCKED_APP_ICONS: Record<string, string> = {
-  instagram: '📸', tiktok: '🎵', twitter: '🐦', youtube: '▶️',
-  reddit: '🤖', snapchat: '👻', facebook: '👍', pinterest: '📌',
-  twitch: '🎮', discord: '💬', spotify: '🎧', netflix: '🎬',
-};
+// Evergreen motivational lines, cycled automatically. Data-driven lines that
+// reflect the user's real week are prepended in buildMascotLines().
+const MOTIVATION_DEFAULT = [
+  'Every quiz makes your brain a little sharper.',
+  'Resisting the scroll is a superpower. 💪',
+  'Future you says thanks for this one. 🙌',
+  'Small wins stack up. Keep going!',
+  'Focus is a muscle, and you are training it.',
+];
 
-const APP_NAMES: Record<string, string> = {
-  instagram: 'Instagram', tiktok: 'TikTok', twitter: 'X / Twitter',
-  youtube: 'YouTube', reddit: 'Reddit', snapchat: 'Snapchat',
-  facebook: 'Facebook', pinterest: 'Pinterest', twitch: 'Twitch',
-  discord: 'Discord', spotify: 'Spotify', netflix: 'Netflix',
-};
-
-function StreakFlame({ streak }: { streak: number }) {
-  const pulse = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    if (streak === 0) return;
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1.08, duration: 700, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
-      ])
-    ).start();
-  }, [streak]);
-
-  return (
-    <Animated.View style={[styles.streakOrb, { transform: [{ scale: pulse }] }]}>
-      <LinearGradient
-        colors={['#FF6B35', '#FF3D00']}
-        style={StyleSheet.absoluteFillObject}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      />
-      <Text style={styles.streakEmoji}>🔥</Text>
-      <Text style={styles.streakNum}>{streak}</Text>
-      <Text style={styles.streakLabel}>streak</Text>
-    </Animated.View>
-  );
+/**
+ * Build the mascot's rotating lines. When there is real activity to celebrate,
+ * personal lines come first; otherwise it falls back to the evergreen set.
+ */
+function buildMascotLines(
+  settings: UserSettings,
+  weekResisted: number,
+  trend: ActivityTrend | null,
+): string[] {
+  if (settings.gamesPlayed === 0) {
+    return ['Welcome! Answer a quiz to earn screen time. 🎉'];
+  }
+  const personal: string[] = [];
+  if (weekResisted > 0) {
+    personal.push(
+      `You resisted ${weekResisted} open${weekResisted === 1 ? '' : 's'} this week. Strong! 💪`,
+    );
+  }
+  if (trend && trend.percentChange !== null && trend.percentChange < 0) {
+    personal.push(`Down ${Math.abs(trend.percentChange)}% from last week. Keep it rolling! 📉`);
+  }
+  return [...personal, ...MOTIVATION_DEFAULT];
 }
+
+/** Week-over-week wording for the Home snapshot. Fewer opens is the win. */
+function trendLabel(trend: ActivityTrend | null): string {
+  if (!trend || trend.percentChange === null) return 'Building your baseline';
+  const pct = Math.abs(trend.percentChange);
+  return trend.percentChange <= 0
+    ? `${pct}% fewer than last week`
+    : `${pct}% more than last week`;
+}
+
+/** Green when opens dropped, warm when they rose, muted while building a baseline. */
+function trendColor(trend: ActivityTrend | null): string {
+  if (!trend || trend.percentChange === null) return colors.ink;
+  return trend.percentChange <= 0 ? colors.teal : colors.coral;
+}
+
+const SETTINGS_EMPTY: UserSettings = {
+  blockedApps: [],
+  gameCategory: 'random',
+  questionCount: 3,
+  totalUnlocks: 0,
+  totalBlocked: 0,
+  gamesPlayed: 0,
+  minutes: 0,
+  xp: 0,
+  owned: [],
+  doubleBoost: false,
+};
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [settings, setSettings] = useState<UserSettings | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const fadeIn = useRef(new Animated.Value(0)).current;
-  const slideUp = useRef(new Animated.Value(20)).current;
 
-  const loadSettings = async () => {
-    const s = await getSettings();
-    setSettings(s);
-  };
+  const [settings, setSettings] = useState<UserSettings>(SETTINGS_EMPTY);
+  const [blocking, setBlocking] = useState(false);
+  const [blockedCount, setBlockedCount] = useState(0);
+  const [week, setWeek] = useState<DayStat[]>([]);
+  const [trend, setTrend] = useState<ActivityTrend | null>(null);
 
+  // Reload settings whenever this tab comes into focus
   useFocusEffect(
     useCallback(() => {
-      loadSettings();
-      Animated.parallel([
-        Animated.timing(fadeIn, { toValue: 1, duration: 500, useNativeDriver: true }),
-        Animated.spring(slideUp, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }),
-      ]).start();
-    }, [])
+      let alive = true;
+      (async () => {
+        const [s, groups, w, t] = await Promise.all([
+          getSettings(),
+          getBlockGroups(),
+          getWeeklyActivity(),
+          getActivityTrend(),
+        ]);
+        if (!alive) return;
+        setSettings(s);
+        setBlockedCount(
+          groups.filter((g) => g.enabled).reduce((sum, g) => sum + g.appCount, 0),
+        );
+        setBlocking(isBlockingActive());
+        setWeek(w);
+        setTrend(t);
+      })();
+      return () => { alive = false; };
+    }, []),
   );
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadSettings();
-    setRefreshing(false);
-  };
+  // This-week snapshot from real on-device activity.
+  const weekOpens = week.reduce((sum, d) => sum + d.attempts, 0);
+  const weekResisted = Math.max(0, weekOpens - week.reduce((sum, d) => sum + d.unlocks, 0));
 
-  const blockedApps = settings?.blockedApps ?? [];
-  const activeCategory = settings?.gameCategory ?? 'random';
-  const categoryMeta = CATEGORY_META[activeCategory];
-  const categoryEmoji = CATEGORY_EMOJI[activeCategory];
+  // Mascot message: one line per day, stable until the date rolls over, picked
+  // from the personal + evergreen set.
+  const mascotLines = buildMascotLines(settings, weekResisted, trend);
+  const dayIndex = Math.floor(Date.now() / 86_400_000);
+  const tipText = mascotLines[dayIndex % mascotLines.length];
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Hero gradient bg */}
-      <LinearGradient
-        colors={['#0D0F1A', '#0D1520', '#0D0F1A']}
-        style={StyleSheet.absoluteFillObject}
-        locations={[0, 0.4, 1]}
-      />
+    <View style={styles.screen}>
+      {/* safe-area top pad + top bar */}
+      <View style={{ paddingTop: insets.top, backgroundColor: colors.bg }}>
+        <TopBar brand="Brainfuel" />
+      </View>
 
       <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand.cyan} />
-        }
+        contentContainerStyle={styles.content}
       >
-        <Animated.View style={{ opacity: fadeIn, transform: [{ translateY: slideUp }] }}>
-          {/* Header Row */}
-          <View style={styles.headerRow}>
-            <View>
-              <Text style={styles.greeting}>Good hustle! 💪</Text>
-              <Text style={styles.tagline}>Your brain's on fire today</Text>
-            </View>
-            <Pressable onPress={() => router.push('/paywall')} style={styles.proBadge}>
-              <LinearGradient
-                colors={colors.gradient.cyan}
-                style={StyleSheet.absoluteFillObject}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              />
-              <Text style={styles.proText}>PRO</Text>
-            </Pressable>
-          </View>
+        {/* Mascot + speech bubble */}
+        <View style={styles.mascotRow}>
+          <Mascot size={92} expr="happy" />
+          <Bubble text={tipText} style={{ flex: 1 }} />
+        </View>
 
-          {/* Streak + Stats Row */}
-          <View style={styles.statsRow}>
-            <StreakFlame streak={settings?.streak ?? 0} />
-            <View style={styles.statsRight}>
-              <View style={styles.statsMini}>
-                <StatCard
-                  value={settings?.totalUnlocks ?? 0}
-                  label="Unlocks"
-                  icon="🔓"
-                  accent={colors.brand.cyan}
-                />
-                <StatCard
-                  value={settings?.totalBlocked ?? 0}
-                  label="Blocked"
-                  icon="🛡️"
-                  accent={colors.brand.orange}
-                />
-              </View>
-            </View>
-          </View>
+        {/* Stat tiles */}
+        <View style={styles.statRow}>
+          <Sticker
+            bg={colors.yellow}
+            radius={R.lg}
+            offset={sticker.shadow.sm}
+            style={{ flex: 1 }}
+            innerStyle={styles.stat}
+          >
+            <Text style={styles.statV}>{settings.totalUnlocks}</Text>
+            <Text style={styles.statK}>Quizzes won</Text>
+          </Sticker>
+          <Sticker
+            bg={colors.teal}
+            radius={R.lg}
+            offset={sticker.shadow.sm}
+            style={{ flex: 1 }}
+            innerStyle={styles.stat}
+          >
+            <Text style={[styles.statV, { color: colors.white }]}>{settings.gamesPlayed}</Text>
+            <Text style={[styles.statK, { color: colors.white, opacity: 0.9 }]}>Games played</Text>
+          </Sticker>
+        </View>
 
-          {/* Quick-test CTA */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Test the quiz</Text>
-            <Pressable
-              onPress={() => router.push({ pathname: '/quiz', params: { app: 'test', demo: '1' } })}
-              style={styles.quizCta}
-            >
-              <LinearGradient
-                colors={['#1C2035', '#151829']}
-                style={StyleSheet.absoluteFillObject}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              />
-              <View style={styles.quizCtaLeft}>
-                <Text style={styles.quizCtaTitle}>
-                  {categoryEmoji} {categoryMeta.label} Quiz
-                </Text>
-                <Text style={styles.quizCtaSubtitle}>
-                  {settings?.questionCount ?? 3} questions · Tap to try it out
-                </Text>
-              </View>
-              <View style={styles.quizCtaArrow}>
-                <LinearGradient
-                  colors={colors.gradient.cyan}
-                  style={StyleSheet.absoluteFillObject}
-                />
-                <Ionicons name="play" size={16} color="#0D0F1A" />
-              </View>
-            </Pressable>
-          </View>
-
-          {/* Blocked Apps */}
-          <View style={styles.section}>
-            <View style={styles.sectionRow}>
-              <Text style={styles.sectionLabel}>Blocked Apps</Text>
-              <Pressable onPress={() => router.push('/(tabs)/blocked')} style={styles.seeAll}>
-                <Text style={styles.seeAllText}>Manage →</Text>
-              </Pressable>
-            </View>
-
-            {blockedApps.length === 0 ? (
-              <Pressable
-                onPress={() => router.push('/(tabs)/blocked')}
-                style={styles.emptyBlockCard}
-              >
-                <LinearGradient
-                  colors={['rgba(0,245,255,0.06)', 'rgba(0,245,255,0.02)']}
-                  style={StyleSheet.absoluteFillObject}
-                />
-                <Text style={styles.emptyBlockIcon}>🛡️</Text>
-                <Text style={styles.emptyBlockTitle}>No apps blocked yet</Text>
-                <Text style={styles.emptyBlockSub}>Add apps to start earning your screen time</Text>
-              </Pressable>
-            ) : (
-              <View style={styles.blockedGrid}>
-                {blockedApps.slice(0, 6).map((appId) => (
-                  <View key={appId} style={styles.blockedChip}>
-                    <LinearGradient
-                      colors={['rgba(0,245,255,0.1)', 'rgba(0,245,255,0.04)']}
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                    <Text style={styles.blockedChipEmoji}>
-                      {BLOCKED_APP_ICONS[appId] ?? '📱'}
-                    </Text>
-                    <Text style={styles.blockedChipName}>
-                      {APP_NAMES[appId] ?? appId}
-                    </Text>
-                  </View>
-                ))}
-                {blockedApps.length > 6 && (
-                  <View style={[styles.blockedChip, styles.moreChip]}>
-                    <Text style={styles.moreChipText}>+{blockedApps.length - 6} more</Text>
-                  </View>
-                )}
-              </View>
-            )}
-          </View>
-
-          {/* Shortcuts Setup Banner */}
-          <Pressable onPress={() => router.push('/shortcuts')} style={styles.shortcutsBanner}>
-            <LinearGradient
-              colors={['#1A1E30', '#12162A']}
-              style={StyleSheet.absoluteFillObject}
-            />
-            <View style={styles.shortcutsLeft}>
-              <Text style={styles.shortcutsTitle}>⚙️ Set Up Shortcuts</Text>
-              <Text style={styles.shortcutsSub}>
-                Connect Brainfuel to iOS automations so it activates when you open blocked apps.
+        {/* Weekly snapshot, tappable into the full Stats tab */}
+        <Pressable onPress={() => router.push('/(tabs)/stats' as any)}>
+          <Sticker bg={colors.paper} radius={R.xl} innerStyle={styles.snapCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.snapLabel}>THIS WEEK</Text>
+              <Text style={styles.snapBig}>
+                {weekOpens}
+                <Text style={styles.snapUnit}> open{weekOpens === 1 ? '' : 's'}</Text>
+              </Text>
+              <Text style={[styles.snapTrend, { color: trendColor(trend) }]}>
+                {trendLabel(trend)}
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.brand.cyan} />
-          </Pressable>
+            <Ionicons name="bar-chart" size={22} color={colors.ink} />
+          </Sticker>
+        </Pressable>
 
-          {/* Bottom spacing */}
-          <View style={{ height: spacing.xxl }} />
-        </Animated.View>
+        {/* Locked apps section */}
+        <View style={styles.secRow}>
+          <Text style={styles.secT}>Locked apps</Text>
+          <Pressable onPress={() => router.push('/(tabs)/blocked' as any)}>
+            <Text style={styles.secMore}>Manage {'>'}</Text>
+          </Pressable>
+        </View>
+
+        {/* iOS keeps the chosen apps private (even from us), so we show the live
+            shield status and a real count instead of guessing app identities. */}
+        <Pressable onPress={() => router.push('/(tabs)/blocked' as any)}>
+          <Sticker bg={colors.paper} radius={R.xl} innerStyle={styles.shieldCard}>
+            <View
+              style={[
+                styles.shieldIcon,
+                { backgroundColor: blocking ? colors.purple : colors.bg2 },
+              ]}
+            >
+              <Ionicons
+                name={blocking ? 'shield-checkmark' : 'shield-outline'}
+                size={26}
+                color={blocking ? colors.white : colors.ink}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.shieldTitle}>
+                {blocking
+                  ? `${blockedCount} app${blockedCount !== 1 ? 's' : ''} shielded`
+                  : blockedCount > 0
+                  ? 'Shield is off'
+                  : 'No apps chosen yet'}
+              </Text>
+              <Text style={styles.shieldSub}>
+                {blocking
+                  ? 'Open one to earn time with a quiz'
+                  : 'Tap to set up Screen Time blocking'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.ink} />
+          </Sticker>
+        </Pressable>
+
+        {/* Play CTA */}
+        <Button
+          variant="coral"
+          lg
+          block
+          label="Play to unlock +15 min"
+          onPress={() => router.push('/quiz')}
+        >
+          <Mascot size={26} sprout={false} />
+        </Button>
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg.primary },
-  scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: spacing.base, paddingTop: spacing.base },
-  headerRow: {
+  screen: { flex: 1, backgroundColor: colors.bg },
+  content: {
+    paddingHorizontal: 18,
+    paddingTop: 6,
+    paddingBottom: 130,
+    gap: spacing.lg,
+  },
+
+  // Mascot row
+  mascotRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 12, marginTop: 4 },
+
+  // Stat tiles
+  statRow: { flexDirection: 'row', gap: 12 },
+  stat: { padding: 14 },
+  statV: { fontFamily: fonts.heading, fontSize: 26, color: colors.ink },
+  statK: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: colors.ink,
+    opacity: 0.7,
+    marginTop: 5,
+  },
+
+  // Weekly snapshot card
+  snapCard: {
+    padding: 16,
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  snapLabel: {
+    fontFamily: fonts.body,
+    fontSize: 11.5,
+    letterSpacing: 0.5,
+    color: colors.ink,
+    opacity: 0.55,
+  },
+  snapBig: { fontFamily: fonts.heading, fontSize: 30, color: colors.ink, marginTop: 2 },
+  snapUnit: { fontFamily: fonts.body, fontSize: 16 },
+  snapTrend: { fontFamily: fonts.heading, fontSize: 13, marginTop: 2 },
+
+  // Section header
+  secRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing.xl,
-  },
-  greeting: {
-    fontFamily: 'Nunito_900Black',
-    fontSize: 28,
-    color: colors.text.primary,
-    letterSpacing: -0.5,
-  },
-  tagline: {
-    fontFamily: 'Nunito_600SemiBold',
-    fontSize: 14,
-    color: colors.text.secondary,
+    marginBottom: -4,
     marginTop: 2,
   },
-  proBadge: {
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    ...shadow.cyan,
-  },
-  proText: {
-    fontFamily: 'Nunito_900Black',
-    fontSize: 13,
-    color: colors.text.inverse,
-    letterSpacing: 1.5,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.xl,
-    alignItems: 'center',
-  },
-  streakOrb: {
-    width: 90,
-    height: 90,
-    borderRadius: 24,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    ...shadow.orange,
-  },
-  streakEmoji: { fontSize: 24, marginBottom: -2 },
-  streakNum: {
-    fontFamily: 'Nunito_900Black',
-    fontSize: 26,
-    color: '#fff',
-    lineHeight: 30,
-  },
-  streakLabel: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 10,
-    color: 'rgba(255,255,255,0.8)',
-    letterSpacing: 0.5,
-  },
-  statsRight: { flex: 1 },
-  statsMini: { flexDirection: 'row', gap: spacing.sm },
-  section: { marginBottom: spacing.xl },
-  sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
-  sectionLabel: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 12,
-    color: colors.text.secondary,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: spacing.sm,
-  },
-  seeAll: { paddingVertical: 4, paddingHorizontal: 8 },
-  seeAllText: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 13,
-    color: colors.brand.cyan,
-  },
-  quizCta: {
-    borderRadius: radius.xl,
-    overflow: 'hidden',
+  secT: { fontFamily: fonts.heading, fontSize: 17, color: colors.ink },
+  secMore: { fontFamily: fonts.body, fontSize: 12.5, color: colors.ink, opacity: 0.55 },
+
+  // Shield status card
+  shieldCard: {
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.base,
-    gap: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    ...shadow.md,
+    gap: 14,
   },
-  quizCtaLeft: { flex: 1 },
-  quizCtaTitle: {
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 16,
-    color: colors.text.primary,
-  },
-  quizCtaSubtitle: {
-    fontFamily: 'Nunito_600SemiBold',
-    fontSize: 13,
-    color: colors.text.secondary,
-    marginTop: 3,
-  },
-  quizCtaArrow: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    overflow: 'hidden',
+  shieldIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: R.md,
+    borderWidth: 2.5,
+    borderColor: colors.ink,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emptyBlockCard: {
-    borderRadius: radius.xl,
-    overflow: 'hidden',
-    padding: spacing.xl,
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: colors.border.accent,
-    borderStyle: 'dashed',
-  },
-  emptyBlockIcon: { fontSize: 36, marginBottom: spacing.sm },
-  emptyBlockTitle: {
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 16,
-    color: colors.text.primary,
-    marginBottom: 4,
-  },
-  emptyBlockSub: {
-    fontFamily: 'Nunito_400Regular',
-    fontSize: 13,
-    color: colors.text.secondary,
-    textAlign: 'center',
-  },
-  blockedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  blockedChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border.accent,
-  },
-  blockedChipEmoji: { fontSize: 16 },
-  blockedChipName: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 13,
-    color: colors.brand.cyan,
-  },
-  moreChip: {
-    borderColor: colors.border.medium,
-    backgroundColor: colors.bg.card,
-  },
-  moreChipText: {
-    fontFamily: 'Nunito_600SemiBold',
-    fontSize: 12,
-    color: colors.text.secondary,
-  },
-  shortcutsBanner: {
-    borderRadius: radius.xl,
-    overflow: 'hidden',
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.base,
-    gap: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-  },
-  shortcutsLeft: { flex: 1 },
-  shortcutsTitle: {
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 15,
-    color: colors.text.primary,
-    marginBottom: 4,
-  },
-  shortcutsSub: {
-    fontFamily: 'Nunito_400Regular',
-    fontSize: 12,
-    color: colors.text.secondary,
-    lineHeight: 17,
+  shieldTitle: { fontFamily: fonts.heading, fontSize: 17, color: colors.ink },
+  shieldSub: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: colors.ink,
+    opacity: 0.6,
+    marginTop: 2,
   },
 });

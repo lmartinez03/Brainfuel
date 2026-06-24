@@ -6,40 +6,58 @@ import {
   ScrollView,
   Animated,
   Pressable,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { ChoiceButton } from '../src/components/ChoiceButton';
-import { QuizProgress } from '../src/components/ProgressBar';
-import { ConfettiOverlay } from '../src/components/ConfettiOverlay';
-import { PrimaryButton } from '../src/components/PrimaryButton';
-import { colors, spacing, radius, shadow } from '../src/theme';
+import {
+  colors,
+  radius as R,
+  spacing,
+  sticker,
+  fonts,
+  Sticker,
+  Button,
+  Chip,
+  Mascot,
+  Confetti,
+} from '../src/ui';
 import { getQuiz, Question, CATEGORY_META } from '../src/games';
 import { CATEGORY_EMOJI } from '../src/games/categoryMeta';
 import { GameArt } from '../src/components/GameArt';
-import { getSettings } from '../src/services/storage';
-import { unlockApp, denyAccess } from '../src/services/blocking';
+import {
+  getSettings,
+  incrementUnlock,
+  incrementBlocked,
+  recordBlockAttempt,
+  addMinutes,
+  addXp,
+} from '../src/services/storage';
+import { unlockForMinutes, setQuizVisible } from '../src/services/screenTimeBlocking';
+import { ECONOMY_ENABLED } from '../src/config/featureFlags';
+import { QUIZ_REWARD } from '../src/economy/shopItems';
 
-
-type QuizPhase = 'loading' | 'question' | 'answer_reveal' | 'complete_success' | 'complete_fail';
+type QuizPhase =
+  | 'loading'
+  | 'memorize'
+  | 'question'
+  | 'answer_reveal'
+  | 'complete_success'
+  | 'complete_fail';
 
 type ChoiceState = 'idle' | 'selected' | 'correct' | 'wrong';
-
-const APP_EMOJIS: Record<string, string> = {
-  instagram: '📸', tiktok: '🎵', twitter: '🐦', youtube: '▶️',
-  reddit: '🤖', snapchat: '👻', facebook: '👍', pinterest: '📌',
-  test: '🧪', preview: '👁️', demo: '🎮',
-};
 
 export default function QuizScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const params = useLocalSearchParams<{ app?: string; demo?: string }>();
-  const targetApp = params.app ?? 'instagram';
+  const params = useLocalSearchParams<{ app?: string; demo?: string; mode?: string }>();
   const isDemo = params.demo === '1';
+  // A quiz launched from a real Screen Time shield carries mode 'screentime'.
+  // A practice run started from Home has no params, so it is not counted as
+  // reaching for a blocked app.
+  const isRealBlock = params.mode === 'screentime';
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentQ, setCurrentQ] = useState(0);
@@ -61,19 +79,39 @@ export default function QuizScreen() {
   const timerWidth = useRef(new Animated.Value(1)).current;
   const timerAnim = useRef<Animated.CompositeAnimation | null>(null);
 
+  // Tell the root layout the quiz is on screen, so it won't push another quiz
+  // when the app foregrounds while a block is active.
   useEffect(() => {
-    const load = async () => {
-      const s = await getSettings();
-      const q = getQuiz({ category: s.gameCategory, count: s.questionCount });
-      setQuestions(q);
-      setAnswered(new Array(q.length).fill(false));
-      correctRef.current = 0;
-      wrongRef.current = false;
-      setPhase('question');
-      animateCardIn();
-    };
-    load();
+    setQuizVisible(true);
+    return () => setQuizVisible(false);
   }, []);
+
+  // Log that the user reached for a blocked app. Real shields only, so practice
+  // runs and the onboarding demo do not inflate the stat.
+  useEffect(() => {
+    if (isRealBlock && !isDemo) recordBlockAttempt();
+  }, [isRealBlock, isDemo]);
+
+  // Loads a fresh, reshuffled quiz and resets all run state. Used on mount and
+  // on retry, so replaying after a miss never repeats the same questions.
+  const loadQuiz = useCallback(async () => {
+    const s = await getSettings();
+    const q = getQuiz({ category: s.gameCategory, count: s.questionCount });
+    setQuestions(q);
+    setCurrentQ(0);
+    setAnswered(new Array(q.length).fill(false));
+    setChoiceStates([]);
+    setShowExplanation(false);
+    correctRef.current = 0;
+    wrongRef.current = false;
+    resultOpacity.setValue(0);
+    // Recall questions start in a study phase that hides before the question.
+    setPhase(q[0]?.memorize ? 'memorize' : 'question');
+  }, [resultOpacity]);
+
+  useEffect(() => {
+    loadQuiz();
+  }, [loadQuiz]);
 
   const animateCardIn = () => {
     cardSlide.setValue(40);
@@ -100,7 +138,11 @@ export default function QuizScreen() {
   }, [phase]);
 
   useEffect(() => {
-    if (phase === 'question' && questions.length > 0) {
+    if (questions.length === 0) return;
+    if (phase === 'memorize') {
+      // Study card slides in; no timer runs until they reveal the question.
+      animateCardIn();
+    } else if (phase === 'question') {
       const q = questions[currentQ];
       setChoiceStates(new Array(q.choices.length).fill('idle'));
       setShowExplanation(false);
@@ -146,18 +188,36 @@ export default function QuizScreen() {
     // so there is no reason to finish the remaining questions.
     if (wrongRef.current) {
       setPhase('complete_fail');
-      if (!isDemo) await denyAccess(targetApp);
+      if (!isDemo) await incrementBlocked();
       animateResult();
       return;
     }
     if (currentQ + 1 >= questions.length) {
       // Every question was answered correctly, so unlock access.
       setPhase('complete_success');
+      if (!isDemo) {
+        await incrementUnlock();
+        // The minutes economy ships dark for launch. When enabled, a win also
+        // banks minutes + Brain XP for the Minute Market. Dormant until
+        // featureFlags.economyEnabled is true, so no rebuild to turn it on.
+        if (ECONOMY_ENABLED) {
+          await addMinutes(QUIZ_REWARD.minutes);
+          await addXp(correctRef.current * QUIZ_REWARD.xpPerCorrect + QUIZ_REWARD.xpWinBonus);
+        }
+      }
       animateResult();
     } else {
-      setPhase('question');
+      // Advance. The next question studies first if it has material to memorize.
+      const nextQ = questions[currentQ + 1];
+      setPhase(nextQ?.memorize ? 'memorize' : 'question');
       setCurrentQ((c) => c + 1);
     }
+  };
+
+  // Leaving the study phase hides the material and reveals the question + timer.
+  const handleReadyToAnswer = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPhase('question');
   };
 
   const animateResult = () => {
@@ -174,27 +234,26 @@ export default function QuizScreen() {
       router.back();
       return;
     }
-    const result = await unlockApp(targetApp);
-    if (!result.opened) {
-      // The app is not installed or its URL scheme is unavailable, so go back.
-      router.back();
-    }
+    // Lift the real iOS Screen Time shield, then confirm so the user knows the
+    // window is live before returning to reopen the app they were blocked from.
+    await unlockForMinutes(15);
+    Alert.alert(
+      "You're in! 🎉",
+      'Your blocked apps are open for 15 minutes. Go use them, then they lock again.',
+      [{ text: 'Got it', onPress: () => router.back() }],
+    );
   };
 
+  // Retry pulls a brand-new quiz rather than repeating the one just failed.
   const handleRetry = () => {
-    setCurrentQ(0);
-    correctRef.current = 0;
-    wrongRef.current = false;
-    setAnswered(new Array(questions.length).fill(false));
-    setPhase('question');
-    resultOpacity.setValue(0);
+    loadQuiz();
   };
 
-  // ---- LOADING ----
+  // Loading state
   if (phase === 'loading' || questions.length === 0) {
     return (
-      <View style={[styles.container, styles.centered]}>
-        <Text style={styles.loadingEmoji}>⚡</Text>
+      <View style={[styles.screen, styles.centered]}>
+        <Mascot size={96} expr="thinking" />
         <Text style={styles.loadingText}>Firing up your quiz...</Text>
       </View>
     );
@@ -202,51 +261,52 @@ export default function QuizScreen() {
 
   const q = questions[currentQ];
 
-  // ---- SUCCESS ----
+  // Success screen
   if (phase === 'complete_success') {
     return (
-      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        <LinearGradient
-          colors={['#0A1F16', '#0D0F1A']}
-          style={StyleSheet.absoluteFillObject}
-        />
-        <ConfettiOverlay visible={true} />
-        <Animated.View style={[styles.resultContainer, { opacity: resultOpacity, transform: [{ scale: resultScale }] }]}>
-          <View style={styles.resultOrb}>
-            <LinearGradient colors={colors.gradient.green} style={StyleSheet.absoluteFillObject} />
-            <Text style={styles.resultOrbEmoji}>🔓</Text>
-          </View>
-          <Text style={styles.resultTitle}>You Earned It! 🎉</Text>
-          <Text style={styles.resultSubtitle}>
-            Perfect score! All {questions.length} correct.
+      <View style={[styles.screen, { backgroundColor: colors.teal }]}>
+        <Confetti />
+        <Animated.View
+          style={[
+            styles.resultWrap,
+            { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 },
+            { opacity: resultOpacity, transform: [{ scale: resultScale }] },
+          ]}
+        >
+          <Mascot size={132} expr="excited" />
+          <Text style={[styles.resultTitle, { color: colors.white }]}>You earned it!</Text>
+          <Text style={[styles.resultSub, { color: colors.white }]}>
+            Perfect score, all {questions.length} correct
           </Text>
-          <Text style={styles.resultTime}>You've gained 15 more minutes of screen time</Text>
 
-          <View style={styles.resultAppBadge}>
-            <LinearGradient
-              colors={['rgba(0,217,126,0.15)', 'rgba(0,217,126,0.05)']}
-              style={StyleSheet.absoluteFillObject}
-            />
-            <Text style={styles.resultAppEmoji}>{APP_EMOJIS[targetApp] ?? '📱'}</Text>
-            <Text style={styles.resultAppName}>
-              {targetApp.charAt(0).toUpperCase() + targetApp.slice(1)}
+          <Sticker bg={colors.paper} radius={R.xl} style={styles.earnWrap} innerStyle={styles.earnCard}>
+            <Text style={styles.earnLabel}>SCREEN TIME EARNED</Text>
+            <Text style={styles.earnBig}>
+              +15
+              <Text style={styles.earnUnit}> min</Text>
             </Text>
-          </View>
+          </Sticker>
 
           <View style={styles.resultActions}>
-            <PrimaryButton
-              label={isDemo ? 'Back to App' : 'Redeem 15 min →'}
-              onPress={handleUnlock}
-              variant="green"
-              size="lg"
-            />
-            {!isDemo && (
-              <PrimaryButton
-                label="Stay Off Apps 🧘"
-                onPress={() => router.back()}
-                variant="ghost"
-                size="md"
-              />
+            {isDemo ? (
+              <Button variant="purple" lg block label="Back to app" onPress={handleUnlock} />
+            ) : (
+              <>
+                <Button
+                  variant="purple"
+                  lg
+                  block
+                  label="Claim 15 minutes ⏱️"
+                  onPress={handleUnlock}
+                />
+                <Button
+                  variant="coral"
+                  lg
+                  block
+                  label="Take a break from socials 🧘"
+                  onPress={() => router.back()}
+                />
+              </>
             )}
           </View>
         </Animated.View>
@@ -254,340 +314,394 @@ export default function QuizScreen() {
     );
   }
 
-  // ---- FAIL ----
+  // Fail screen
   if (phase === 'complete_fail') {
     return (
-      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        <LinearGradient
-          colors={['#1F0A0E', '#0D0F1A']}
-          style={StyleSheet.absoluteFillObject}
-        />
-        <Animated.View style={[styles.resultContainer, { opacity: resultOpacity, transform: [{ scale: resultScale }] }]}>
-          <View style={[styles.resultOrb, styles.resultOrbFail]}>
-            <LinearGradient colors={colors.gradient.failBanner} style={StyleSheet.absoluteFillObject} />
-            <Text style={styles.resultOrbEmoji}>🚫</Text>
-          </View>
-          <Text style={[styles.resultTitle, { color: colors.brand.coral }]}>Wrong Answer!</Text>
-          <Text style={styles.resultSubtitle}>
-            That one's not right, and you need every question correct to get in.
+      <View style={styles.screen}>
+        <Animated.View
+          style={[
+            styles.resultWrap,
+            { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 },
+            { opacity: resultOpacity, transform: [{ scale: resultScale }] },
+          ]}
+        >
+          <Mascot size={132} expr="sad" />
+          <Text style={[styles.resultTitle, { color: colors.ink }]}>So close!</Text>
+          <Text style={[styles.resultSub, { color: colors.ink }]}>
+            You need every question right to get in.
           </Text>
-          <Text style={[styles.resultTime, { color: colors.text.secondary }]}>
-            Give it another shot, or stay off the app and keep your focus. 🧘
+          <Text style={styles.missNote}>
+            Give it another go, or take a break and keep your focus.
           </Text>
 
           <View style={styles.resultActions}>
-            <PrimaryButton
-              label="Try Again 🔄"
-              onPress={handleRetry}
+            <Button
               variant="coral"
-              size="lg"
-            />
-            <PrimaryButton
-              label="Stay Off Apps"
+              lg
+              block
+              label="Take a break from socials 🧘"
               onPress={() => router.back()}
-              variant="ghost"
-              size="md"
             />
+            <Chip bg={colors.white} onPress={handleRetry}>
+              <Text style={styles.ghostChipText}>Try again</Text>
+            </Chip>
           </View>
         </Animated.View>
       </View>
     );
   }
 
-  // ---- QUESTION / ANSWER_REVEAL ----
+  // Study screen: show the material to memorize, then hide it on continue so
+  // the answer cannot be re-read while choosing.
+  if (phase === 'memorize') {
+    return (
+      <View style={[styles.screen, { paddingTop: insets.top }]}>
+        <View style={styles.topBar}>
+          <Chip onPress={() => router.back()}>
+            <Ionicons name="close" size={16} color={colors.ink} />
+          </Chip>
+          <View style={styles.pips}>
+            {questions.map((_, i) => {
+              const bg =
+                i < currentQ ? colors.teal : i === currentQ ? colors.yellow : 'rgba(43,26,16,0.18)';
+              return <View key={i} style={[styles.pip, { backgroundColor: bg }]} />;
+            })}
+          </View>
+          <Chip bg={colors.yellow}>
+            <Ionicons name="time" size={15} color={colors.ink} />
+            <Text style={styles.rewardText}>+15</Text>
+          </Chip>
+        </View>
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+        >
+          <View style={styles.mascotRow}>
+            <Mascot size={84} expr="thinking" />
+            <Text style={styles.status}>Memorize this</Text>
+          </View>
+
+          <Animated.View style={{ opacity: cardOpacity, transform: [{ translateY: cardSlide }] }}>
+            <Sticker bg={colors.paper} radius={R.xl} innerStyle={styles.studyCard}>
+              <Text style={styles.studyText}>{q.memorize}</Text>
+            </Sticker>
+          </Animated.View>
+
+          <Text style={styles.studyNote}>
+            This hides the moment you continue, so there is no peeking. Look carefully.
+          </Text>
+
+          <Button
+            variant="coral"
+            lg
+            block
+            label="I'm ready, hide it"
+            onPress={handleReadyToAnswer}
+          />
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // Question and answer-reveal screen
+  const mascotExpr = phase === 'question' ? 'thinking' : wrongRef.current ? 'sad' : 'excited';
+  const statusText =
+    phase === 'question'
+      ? `Question ${currentQ + 1} of ${questions.length}`
+      : wrongRef.current
+      ? 'Oof, not quite'
+      : 'Nice one! 🎉';
+
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <LinearGradient
-        colors={['#0D0F1A', '#0D1220']}
-        style={StyleSheet.absoluteFillObject}
-      />
-
-      {/* Top bar */}
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
+      {/* Top bar: close, progress pips, reward */}
       <View style={styles.topBar}>
-        <Pressable onPress={() => router.back()} style={styles.closeBtn}>
-          <Ionicons name="close" size={20} color={colors.text.secondary} />
-        </Pressable>
-
-        <View style={styles.topCenter}>
-          <Text style={styles.appLabel}>
-            {APP_EMOJIS[targetApp] ?? '📱'} Earn access
-          </Text>
-          <QuizProgress current={currentQ} total={questions.length} answered={answered} />
+        <Chip onPress={() => router.back()}>
+          <Ionicons name="close" size={16} color={colors.ink} />
+        </Chip>
+        <View style={styles.pips}>
+          {questions.map((_, i) => {
+            let bg: string;
+            if (i < currentQ) bg = colors.teal;
+            else if (i === currentQ) {
+              bg = phase === 'answer_reveal' ? (wrongRef.current ? colors.pink : colors.teal) : colors.yellow;
+            } else bg = 'rgba(43,26,16,0.18)';
+            return <View key={i} style={[styles.pip, { backgroundColor: bg }]} />;
+          })}
         </View>
-
-        <View style={styles.topRight}>
-          <Text style={styles.questionCounter}>
-            {currentQ + 1}/{questions.length}
-          </Text>
-        </View>
+        <Chip bg={colors.yellow}>
+          <Ionicons name="time" size={15} color={colors.ink} />
+          <Text style={styles.rewardText}>+15</Text>
+        </Chip>
       </View>
 
       {/* Timer bar */}
-      {phase === 'question' && (
-        <View style={styles.timerTrack}>
-          <Animated.View
-            style={[
-              styles.timerFill,
-              {
-                flex: timerWidth,
-              },
-            ]}
-          >
-            <LinearGradient
-              colors={colors.gradient.cyan}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={StyleSheet.absoluteFillObject}
-            />
-          </Animated.View>
-        </View>
-      )}
+      <View style={styles.timerTrack}>
+        <Animated.View
+          style={[
+            styles.timerFill,
+            {
+              width: timerWidth.interpolate({
+                inputRange: [0, 1],
+                outputRange: ['0%', '100%'],
+              }),
+              backgroundColor: phase === 'question' ? colors.coral : colors.teal,
+            },
+          ]}
+        />
+      </View>
 
       <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: insets.bottom + (phase === 'answer_reveal' ? 170 : 24) },
+        ]}
       >
-        {/* Category illustration */}
-        <View style={styles.questionArt}>
-          <GameArt category={q.category} size={92} />
+        {/* Mascot + status */}
+        <View style={styles.mascotRow}>
+          <Mascot size={84} expr={mascotExpr} />
+          <Text style={styles.status}>{statusText}</Text>
         </View>
 
-        {/* Category badge */}
-        <View style={styles.categoryBadge}>
-          <LinearGradient
-            colors={CATEGORY_META[q.category].gradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={StyleSheet.absoluteFillObject}
-          />
-          <Text style={styles.categoryText}>
-            {CATEGORY_EMOJI[q.category]} {CATEGORY_META[q.category].label}
-          </Text>
+        {/* Category illustration + badge */}
+        <View style={styles.artRow}>
+          <GameArt category={q.category} size={84} />
+          <Chip bg={colors.white}>
+            <Text style={styles.badgeText}>
+              {CATEGORY_EMOJI[q.category]} {CATEGORY_META[q.category].label}
+            </Text>
+          </Chip>
         </View>
 
         {/* Question card */}
-        <Animated.View
-          style={[
-            styles.questionCard,
-            { opacity: cardOpacity, transform: [{ translateY: cardSlide }] },
-          ]}
-        >
-          <LinearGradient
-            colors={['#1C2035', '#151829']}
-            style={StyleSheet.absoluteFillObject}
-          />
-          <Text style={styles.questionText}>{q.prompt}</Text>
+        <Animated.View style={{ opacity: cardOpacity, transform: [{ translateY: cardSlide }] }}>
+          <Sticker bg={colors.paper} radius={R.xl} innerStyle={styles.qCard}>
+            <Text style={styles.qText}>{q.prompt}</Text>
+          </Sticker>
         </Animated.View>
+
+        {/* Why (appears under the question after answering, so the choices below
+            stay reviewable while the screen keeps scrolling). */}
+        {showExplanation && q.explanation && (
+          <Sticker bg={colors.bg2} radius={R.lg} offset={sticker.shadow.sm} innerStyle={styles.explCard}>
+            <Text style={styles.explTitle}>💡 Why</Text>
+            <Text style={styles.explText}>{q.explanation}</Text>
+          </Sticker>
+        )}
 
         {/* Choices */}
-        <Animated.View style={{ opacity: cardOpacity }}>
-          {q.choices.map((choice, i) => (
-            <ChoiceButton
-              key={i}
-              label={choice}
-              index={i}
-              state={choiceStates[i] ?? 'idle'}
-              onPress={() => handleAnswer(i)}
-              disabled={phase === 'answer_reveal'}
-            />
-          ))}
+        <Animated.View style={{ opacity: cardOpacity, gap: 11 }}>
+          {q.choices.map((choice, i) => {
+            const state = choiceStates[i] ?? 'idle';
+            const revealed = phase === 'answer_reveal';
+            let optBg: string = colors.white;
+            let fg: string = colors.ink;
+            let keyBg: string = colors.yellow;
+            let dim = false;
+            if (revealed) {
+              if (state === 'correct') {
+                optBg = colors.teal;
+                fg = colors.white;
+                keyBg = colors.white;
+              } else if (state === 'wrong') {
+                optBg = colors.pink;
+                fg = colors.white;
+                keyBg = colors.white;
+              } else {
+                dim = true;
+              }
+            }
+            return (
+              <Pressable
+                key={i}
+                disabled={revealed}
+                onPress={() => handleAnswer(i)}
+                style={{ opacity: dim ? 0.5 : 1 }}
+              >
+                <Sticker bg={optBg} radius={R.md} offset={sticker.shadow.sm} innerStyle={styles.opt}>
+                  <View style={[styles.optKey, { backgroundColor: keyBg }]}>
+                    <Text style={styles.optKeyText}>{String.fromCharCode(65 + i)}</Text>
+                  </View>
+                  <Text style={[styles.optText, { color: fg }]}>{choice}</Text>
+                </Sticker>
+              </Pressable>
+            );
+          })}
         </Animated.View>
 
-        {/* Explanation */}
-        {showExplanation && q.explanation && (
-          <Animated.View style={[styles.explanationCard, { opacity: cardOpacity }]}>
-            <LinearGradient
-              colors={['rgba(0,245,255,0.06)', 'rgba(0,245,255,0.02)']}
-              style={StyleSheet.absoluteFillObject}
-            />
-            <Text style={styles.explanationTitle}>💡 Explanation</Text>
-            <Text style={styles.explanationText}>{q.explanation}</Text>
-          </Animated.View>
-        )}
-
-        {/* Next / Finish button */}
-        {phase === 'answer_reveal' && (
-          <Animated.View style={{ opacity: cardOpacity, marginTop: spacing.sm }}>
-            <PrimaryButton
-              label={wrongRef.current || currentQ + 1 >= questions.length ? 'See Result →' : 'Next Question →'}
-              onPress={handleNext}
-              variant="cyan"
-              size="lg"
-            />
-          </Animated.View>
-        )}
       </ScrollView>
+
+      {/* Pinned bottom bar: an instant correct/wrong badge plus the next action,
+          so feedback and advancing never need a scroll. */}
+      {phase === 'answer_reveal' && (
+        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
+          <View
+            style={[
+              styles.resultBadge,
+              { backgroundColor: wrongRef.current ? colors.pink : colors.teal },
+            ]}
+          >
+            <Ionicons
+              name={wrongRef.current ? 'close-circle' : 'checkmark-circle'}
+              size={20}
+              color={colors.white}
+            />
+            <Text style={styles.resultBadgeText}>
+              {wrongRef.current ? 'Wrong answer' : 'Correct!'}
+            </Text>
+          </View>
+          <Button
+            variant="coral"
+            lg
+            block
+            label={wrongRef.current || currentQ + 1 >= questions.length ? 'See result' : 'Next question'}
+            onPress={handleNext}
+          />
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg.primary },
-  centered: { alignItems: 'center', justifyContent: 'center' },
-  loadingEmoji: { fontSize: 64, marginBottom: spacing.base },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  centered: { alignItems: 'center', justifyContent: 'center', gap: 16 },
   loadingText: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 18,
-    color: colors.text.secondary,
+    fontFamily: fonts.body,
+    fontSize: 16,
+    color: colors.ink,
+    opacity: 0.7,
   },
+
+  // Top bar
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.md,
-    gap: spacing.sm,
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 10,
   },
-  closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: colors.bg.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
+
+  // Pinned bottom action bar (the Next button overlay)
+  bottomBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    backgroundColor: colors.bg,
+    borderTopWidth: sticker.borderWidth,
+    borderTopColor: colors.ink,
   },
-  topCenter: { flex: 1, gap: 6 },
-  appLabel: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 12,
-    color: colors.text.secondary,
-    letterSpacing: 0.5,
-  },
-  topRight: { width: 44, alignItems: 'flex-end' },
-  questionCounter: {
-    fontFamily: 'Nunito_900Black',
-    fontSize: 14,
-    color: colors.brand.cyan,
-  },
-  timerTrack: {
-    height: 3,
-    backgroundColor: colors.bg.card,
+  resultBadge: {
     flexDirection: 'row',
-  },
-  timerFill: {
-    height: 3,
-    overflow: 'hidden',
-  },
-  scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: spacing.base, paddingTop: spacing.base },
-  questionArt: {
     alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  categoryBadge: {
-    alignSelf: 'flex-start',
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginBottom: spacing.md,
-  },
-  categoryText: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 12,
-    color: '#fff',
-    letterSpacing: 0.3,
-  },
-  questionCard: {
-    borderRadius: radius.xxl,
-    overflow: 'hidden',
-    padding: spacing.xl,
-    marginBottom: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border.subtle,
-    minHeight: 120,
     justifyContent: 'center',
-    ...shadow.md,
+    gap: 6,
+    alignSelf: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: R.pill,
+    borderWidth: 2.5,
+    borderColor: colors.ink,
+    marginBottom: 10,
   },
-  questionText: {
-    fontFamily: 'Nunito_800ExtraBold',
-    fontSize: 20,
-    color: colors.text.primary,
-    lineHeight: 30,
-    letterSpacing: -0.3,
-  },
-  explanationCard: {
-    borderRadius: radius.xl,
+  resultBadgeText: { fontFamily: fonts.heading, fontSize: 15, color: colors.white },
+  pips: { flex: 1, flexDirection: 'row', gap: 6 },
+  pip: { flex: 1, height: 9, borderRadius: R.pill, borderWidth: 2, borderColor: colors.ink },
+  rewardText: { fontFamily: fonts.heading, fontSize: 14, color: colors.ink },
+
+  // Timer
+  timerTrack: {
+    height: 10,
+    marginHorizontal: 18,
+    borderRadius: R.pill,
+    borderWidth: 2,
+    borderColor: colors.ink,
+    backgroundColor: 'rgba(43,26,16,0.12)',
     overflow: 'hidden',
-    padding: spacing.base,
-    marginBottom: spacing.base,
-    borderWidth: 1,
-    borderColor: colors.border.accent,
   },
-  explanationTitle: {
-    fontFamily: 'Nunito_800ExtraBold',
+  timerFill: { height: '100%', borderRadius: R.pill },
+
+  // Content
+  content: { paddingHorizontal: 18, paddingTop: 12, gap: spacing.lg },
+  mascotRow: { alignItems: 'center', gap: 8 },
+  status: { fontFamily: fonts.heading, fontSize: 15, color: colors.ink, opacity: 0.7 },
+
+  artRow: { alignItems: 'center', gap: 10 },
+  badgeText: { fontFamily: fonts.heading, fontSize: 13, color: colors.ink },
+
+  qCard: { padding: 20 },
+  qText: { fontFamily: fonts.heading, fontSize: 22, color: colors.ink, lineHeight: 28 },
+
+  // Study (memorize) screen
+  studyCard: { paddingVertical: 32, paddingHorizontal: 22, alignItems: 'center', minHeight: 150, justifyContent: 'center' },
+  studyText: {
+    fontFamily: fonts.heading,
+    fontSize: 24,
+    color: colors.ink,
+    textAlign: 'center',
+    lineHeight: 34,
+  },
+  studyNote: {
+    fontFamily: fonts.body,
     fontSize: 13,
-    color: colors.brand.cyan,
-    marginBottom: 6,
-    letterSpacing: 0.3,
+    color: colors.ink,
+    opacity: 0.6,
+    textAlign: 'center',
+    lineHeight: 18,
   },
-  explanationText: {
-    fontFamily: 'Nunito_400Regular',
-    fontSize: 14,
-    color: colors.text.secondary,
-    lineHeight: 21,
+
+  opt: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 15, paddingVertical: 15 },
+  optKey: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    borderWidth: 2.5,
+    borderColor: colors.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  resultContainer: {
+  optKeyText: { fontFamily: fonts.heading, fontSize: 14, color: colors.ink },
+  optText: { fontFamily: fonts.body, fontSize: 16, flex: 1 },
+
+  explCard: { padding: 14, gap: 4 },
+  explTitle: { fontFamily: fonts.heading, fontSize: 13, color: colors.ink },
+  explText: { fontFamily: fonts.bodyRegular, fontSize: 14, color: colors.ink, opacity: 0.8, lineHeight: 21 },
+
+  // Result (success + fail share)
+  resultWrap: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: 24,
+    gap: 16,
   },
-  resultOrb: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.xl,
-    ...shadow.lg,
-  },
-  resultOrbFail: {
-    shadowColor: colors.brand.coral,
-  },
-  resultOrbEmoji: { fontSize: 54 },
-  resultTitle: {
-    fontFamily: 'Nunito_900Black',
-    fontSize: 42,
-    color: colors.brand.green,
-    letterSpacing: -1,
-    marginBottom: spacing.sm,
-  },
-  resultSubtitle: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 16,
-    color: colors.text.secondary,
-    marginBottom: spacing.sm,
-  },
-  resultTime: {
-    fontFamily: 'Nunito_600SemiBold',
+  resultTitle: { fontFamily: fonts.heading, fontSize: 36, textAlign: 'center' },
+  resultSub: { fontFamily: fonts.body, fontSize: 16, textAlign: 'center', opacity: 0.9 },
+  missNote: {
+    fontFamily: fonts.body,
     fontSize: 14,
-    color: colors.brand.green,
-    marginBottom: spacing.xxl,
+    color: colors.ink,
+    opacity: 0.8,
+    textAlign: 'center',
+    maxWidth: 260,
   },
-  resultAppBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(0,217,126,0.3)',
-    marginBottom: spacing.xxl,
-  },
-  resultAppEmoji: { fontSize: 22 },
-  resultAppName: {
-    fontFamily: 'Nunito_800ExtraBold',
+  earnWrap: { alignSelf: 'stretch' },
+  earnCard: { paddingVertical: 20, paddingHorizontal: 28, alignItems: 'center' },
+  earnLabel: { fontFamily: fonts.body, fontSize: 12.5, letterSpacing: 0.5, color: colors.ink, opacity: 0.6 },
+  earnBig: { fontFamily: fonts.heading, fontSize: 52, color: colors.coral, marginVertical: 2 },
+  earnUnit: { fontSize: 24 },
+  resultActions: { width: '100%', gap: 12, alignItems: 'center', marginTop: 4 },
+  ghostChipText: {
+    fontFamily: fonts.heading,
     fontSize: 16,
-    color: colors.brand.green,
-  },
-  resultActions: {
-    width: '100%',
-    gap: spacing.sm,
+    color: colors.ink,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
   },
 });

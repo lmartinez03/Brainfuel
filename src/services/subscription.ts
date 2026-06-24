@@ -1,263 +1,216 @@
 /**
- * Subscription service: 3-day free trial and Apple StoreKit stubs.
+ * Subscription service (Apple StoreKit via react-native-iap, the same library
+ * proven in the Forkd app). No third party, no accounts, no backend.
  *
- * ============================================================
- * IMPLEMENTATION STATUS
- * ============================================================
- * This module provides the shape and stub implementations needed by the rest
- * of the app. The real billing logic (StoreKit receipt validation, Firestore
- * subscription records, restore flow) will be implemented in the billing sprint.
+ * Brainfuel REQUIRES a subscription to use the app. Access is an Apple StoreKit
+ * entitlement tied to the user's Apple ID, so:
+ *   - There is no Brainfuel login and no server. Apple owns the receipt.
+ *   - hasActiveSubscription() asks StoreKit directly whether this Apple ID has
+ *     an active sub, and caches the answer on-device for a fast next launch.
+ *   - "Restore" re-reads the same Apple ID receipt on any device.
+ *   - The 3-day free trial on the annual plan is an App Store Connect
+ *     introductory offer, configured there, not timed in code.
  *
- * TODO (billing sprint):
- *   - Integrate `expo-iap` or `react-native-purchases` (RevenueCat recommended)
- *     for cross-platform StoreKit / Google Play Billing.
- *   - Replace getSubscriptionStatus() with real receipt validation.
- *   - Add Firestore write on successful purchase (see firestore.ts).
- *   - Implement webhook handler (server-side) for subscription renewal events.
- *   - Add grace-period logic for failed renewals.
- * ============================================================
- *
- * PRODUCT IDs (create these in App Store Connect):
- *   brainfuel_pro_monthly  at $2.99/month
- *   brainfuel_pro_annual   at $19.99/year (~44% saving)
- *
- * TRIAL LOGIC:
- *   A 3-day free trial is offered on both plans. The trial start date is
- *   persisted in AsyncStorage (via storage.ts) so it survives app restarts
- *   even before a StoreKit receipt is available.
- * ============================================================
+ * react-native-iap is a native module, so it is require-guarded: in Expo Go, on
+ * web, and in tests (no StoreKit) it is absent and we fall back to a local grant
+ * so the app stays usable while developing. Real billing runs in a dev build.
  */
 
 import {
-  getTrialStartedAt,
-  setTrialStartedAt,
   getPersistedSubscriptionStatus,
   setPersistedSubscriptionStatus,
 } from './storage';
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
+// Guarded native import. Present only in a dev/production build with StoreKit.
+let IAP: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  IAP = require('react-native-iap');
+} catch {
+  IAP = null;
+}
 
-export const TRIAL_DURATION_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
-
+// Product identifiers. These must match the auto-renewing subscription products
+// created in App Store Connect, with the 3-day free trial set as an
+// introductory offer on the annual product only.
 export const PRODUCT_IDS = {
-  monthly: 'brainfuel_pro_monthly',
-  annual: 'brainfuel_pro_annual',
+  monthly: 'com.brainfuel.app.pro.monthly',
+  annual: 'com.brainfuel.app.pro.annual',
 } as const;
 
 export type ProductId = (typeof PRODUCT_IDS)[keyof typeof PRODUCT_IDS];
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+const ALL_PRODUCT_IDS: string[] = [PRODUCT_IDS.monthly, PRODUCT_IDS.annual];
 
-export type SubscriptionStatusCode =
-  | 'trial_active'    // within 3-day free trial
-  | 'trial_expired'   // trial ended, not subscribed
-  | 'subscribed'      // active paid subscription
-  | 'cancelled'       // subscription cancelled (still has access until period end)
-  | 'expired'         // subscription lapsed
-  | 'unknown';        // initial state before any check
-
-export interface SubscriptionStatus {
-  /** Whether the user currently has full access (trial OR active subscription). */
-  isActive: boolean;
-  /** Whether the user is in their 3-day free trial period. */
-  isTrialing: boolean;
-  /** When the trial ends (null if not in trial or trial not started). */
-  trialEndsAt: Date | null;
-  /** Granular status code for analytics and UI display. */
-  statusCode: SubscriptionStatusCode;
-  /** The product ID the user is subscribed to (null if not subscribed). */
-  planId: ProductId | null;
-  /** Whether the subscription is set to auto-renew. */
-  willRenew: boolean;
-  /** When the current period ends (null if unknown). */
-  currentPeriodEnd: Date | null;
-}
+/**
+ * Display pricing for the paywall. The App Store is the real source of truth for
+ * localized prices; these strings drive the layout and must match the prices you
+ * set in App Store Connect.
+ */
+export const PRICING = {
+  monthly: {
+    price: '$5.99',
+    period: 'month',
+  },
+  annual: {
+    price: '$39.99',
+    period: 'year',
+    /** Annual price divided across 12 months, for the "cheaper per month" pitch. */
+    perMonth: '$3.33',
+    /** Rounded saving vs 12 months at the monthly price ($71.88). */
+    savingsPercent: 44,
+    trialDays: 3,
+  },
+} as const;
 
 export interface PurchaseResult {
   success: boolean;
   error?: string;
-  /**
-   * The transaction ID from StoreKit if successful.
-   * TODO: Use this to validate the receipt server-side.
-   */
-  transactionId?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Trial management
-// ---------------------------------------------------------------------------
+// StoreKit connection + listeners are set up once, lazily.
+let connected = false;
+let listenersBound = false;
+// A purchase is event-based: requestPurchase() kicks it off and the result
+// arrives on a listener. This resolver bridges that back to startPurchase().
+let pendingPurchase: ((result: PurchaseResult) => void) | null = null;
 
-/**
- * Starts the 3-day free trial by recording the current timestamp.
- * No-ops if the trial has already been started.
- */
-export async function startTrial(): Promise<void> {
-  const existing = await getTrialStartedAt();
-  if (existing !== null) return; // already started
-  await setTrialStartedAt(Date.now());
+function settlePurchase(result: PurchaseResult): void {
+  const resolve = pendingPurchase;
+  pendingPurchase = null;
+  resolve?.(result);
+}
+
+function bindListeners(): void {
+  if (listenersBound || !IAP) return;
+  listenersBound = true;
+
+  IAP.purchaseUpdatedListener(async (purchase: any) => {
+    try {
+      // Acknowledge the transaction with Apple so it is not refunded after 3 days.
+      await IAP.finishTransaction({ purchase, isConsumable: false });
+    } catch {
+      // Even if finishing throws, the entitlement is live; treat it as a success.
+    }
+    await setPersistedSubscriptionStatus('subscribed');
+    settlePurchase({ success: true });
+  });
+
+  IAP.purchaseErrorListener((error: any) => {
+    const cancelled = error?.code === 'E_USER_CANCELLED';
+    settlePurchase({
+      success: false,
+      error: cancelled ? undefined : error?.message || 'Purchase failed.',
+    });
+  });
+}
+
+async function ensureConnection(): Promise<void> {
+  if (connected || !IAP) return;
+  await IAP.initConnection();
+  connected = true;
+  bindListeners();
 }
 
 /**
- * Returns whether the user is currently within their free trial window.
+ * Whether the user currently has an active subscription (or trial). The whole
+ * app is gated on this. Queries StoreKit when available and caches the result;
+ * falls back to the cached value when StoreKit is unavailable (Expo Go, offline).
  */
-export async function isInTrial(): Promise<boolean> {
-  const startedAt = await getTrialStartedAt();
-  if (startedAt === null) return false;
-  return Date.now() < startedAt + TRIAL_DURATION_MS;
-}
-
-/**
- * Returns the Date when the trial ends, or null if the trial has not started
- * or has already expired.
- */
-export async function getTrialEndDate(): Promise<Date | null> {
-  const startedAt = await getTrialStartedAt();
-  if (startedAt === null) return null;
-  const endsAt = new Date(startedAt + TRIAL_DURATION_MS);
-  if (Date.now() >= endsAt.getTime()) return null;
-  return endsAt;
-}
-
-// ---------------------------------------------------------------------------
-// Subscription status
-// ---------------------------------------------------------------------------
-
-/**
- * Returns the user's current subscription status.
- *
- * STUB BEHAVIOUR:
- *   - If the trial has been started and is still active: returns 'trial_active'
- *   - If the trial has expired and no subscription: returns 'trial_expired'
- *   - If the trial has not been started yet: starts it and returns 'trial_active'
- *   - 'subscribed' is only returned if a real StoreKit receipt is validated
- *     (TODO: billing sprint)
- *
- * The UI should call this on every app launch and on foreground transitions.
- */
-export async function getSubscriptionStatus(): Promise<SubscriptionStatus> {
-  // TODO (billing sprint): Check StoreKit receipt / RevenueCat entitlements first.
-  //   const rcStatus = await Purchases.getCustomerInfo();
-  //   if (rcStatus.entitlements.active['pro']) { ... }
-
-  // Check persisted override (e.g. set after a successful purchase in this session)
-  const persisted = await getPersistedSubscriptionStatus();
-  if (persisted === 'subscribed') {
-    return {
-      isActive: true,
-      isTrialing: false,
-      trialEndsAt: null,
-      statusCode: 'subscribed',
-      planId: null, // TODO: persist planId too
-      willRenew: true,
-      currentPeriodEnd: null,
-    };
+export async function hasActiveSubscription(): Promise<boolean> {
+  const cached = (await getPersistedSubscriptionStatus()) === 'subscribed';
+  if (!IAP) return cached;
+  try {
+    await ensureConnection();
+    const active: boolean = await IAP.hasActiveSubscriptions(ALL_PRODUCT_IDS);
+    if (active) {
+      await setPersistedSubscriptionStatus('subscribed');
+      return true;
+    }
+    // Apple reports no active subscription. Only enforce that (and lock the user
+    // out) once the products actually exist in App Store Connect. Before then
+    // there is nothing to buy, so we keep whatever access was granted for
+    // testing rather than wiping it on every launch.
+    if (await storeHasProducts()) {
+      await setPersistedSubscriptionStatus('unknown');
+      return false;
+    }
+    return cached;
+  } catch {
+    return cached;
   }
+}
 
-  // Fall back to trial logic
-  const trialStartedAt = await getTrialStartedAt();
-
-  if (trialStartedAt === null) {
-    // First-ever launch; auto-start the trial
-    await startTrial();
-    const trialEndsAt = new Date(Date.now() + TRIAL_DURATION_MS);
-    return {
-      isActive: true,
-      isTrialing: true,
-      trialEndsAt,
-      statusCode: 'trial_active',
-      planId: null,
-      willRenew: false,
-      currentPeriodEnd: trialEndsAt,
-    };
+/**
+ * Whether the subscription products are actually purchasable yet. Returns false
+ * before they are created in App Store Connect (or while the Paid Apps agreement
+ * is pending), which is how the app knows billing is not live yet.
+ */
+async function storeHasProducts(): Promise<boolean> {
+  if (!IAP) return false;
+  try {
+    const products = await IAP.fetchProducts({ skus: ALL_PRODUCT_IDS, type: 'subs' });
+    return Array.isArray(products) && products.length > 0;
+  } catch {
+    return false;
   }
-
-  const trialEndsAt = new Date(trialStartedAt + TRIAL_DURATION_MS);
-  const inTrial = Date.now() < trialEndsAt.getTime();
-
-  return {
-    isActive: inTrial,
-    isTrialing: inTrial,
-    trialEndsAt: inTrial ? trialEndsAt : null,
-    statusCode: inTrial ? 'trial_active' : 'trial_expired',
-    planId: null,
-    willRenew: false,
-    currentPeriodEnd: inTrial ? trialEndsAt : null,
-  };
 }
 
 /**
- * Returns true if the user currently has full access (trial or subscription).
- */
-export async function isSubscribed(): Promise<boolean> {
-  const status = await getSubscriptionStatus();
-  return status.isActive;
-}
-
-/**
- * Returns how many milliseconds remain in the user's trial, or 0 if expired.
- */
-export async function getTrialRemainingMs(): Promise<number> {
-  const startedAt = await getTrialStartedAt();
-  if (startedAt === null) return TRIAL_DURATION_MS; // not started yet = full trial available
-  const remaining = startedAt + TRIAL_DURATION_MS - Date.now();
-  return Math.max(0, remaining);
-}
-
-// ---------------------------------------------------------------------------
-// Purchase flow stubs
-// ---------------------------------------------------------------------------
-
-/**
- * Initiates a purchase for the given product.
- *
- * TODO (billing sprint): Replace with real StoreKit / RevenueCat flow.
- *   import Purchases from 'react-native-purchases';
- *   const offerings = await Purchases.getOfferings();
- *   const package = offerings.current?.monthly;
- *   const { customerInfo } = await Purchases.purchasePackage(package);
+ * Starts a purchase for the given plan. The annual plan begins with the 3-day
+ * free trial; the monthly plan bills immediately. Resolves once the entitlement
+ * is active (or the user cancels / it fails).
  */
 export async function startPurchase(productId: ProductId): Promise<PurchaseResult> {
-  // TODO: implement real purchase
-  console.warn('[Subscription] startPurchase() is a stub. Product:', productId);
-  return {
-    success: false,
-    error: 'Billing not yet implemented. This will be completed in the billing sprint.',
-  };
+  // No StoreKit (Expo Go / web): grant locally so the app stays usable in dev.
+  if (!IAP) {
+    await setPersistedSubscriptionStatus('subscribed');
+    return { success: true };
+  }
+  try {
+    await ensureConnection();
+    // Load the product first. If the store returns nothing, the subscriptions
+    // are not live in App Store Connect yet (or the Paid Apps agreement is
+    // pending), so there is nothing to buy. Grant access locally so testing is
+    // not blocked; once the products exist, the real purchase below runs.
+    const products = await IAP.fetchProducts({ skus: [productId], type: 'subs' });
+    if (!Array.isArray(products) || products.length === 0) {
+      console.warn(
+        `[Subscription] "${productId}" is not available from the App Store yet; granting access locally. Create the products in App Store Connect to enable real billing.`,
+      );
+      await setPersistedSubscriptionStatus('subscribed');
+      return { success: true };
+    }
+    return await new Promise<PurchaseResult>((resolve) => {
+      pendingPurchase = resolve;
+      IAP.requestPurchase({ request: { apple: { sku: productId } }, type: 'subs' }).catch(
+        (e: any) => settlePurchase({ success: false, error: e?.message || 'Purchase failed.' }),
+      );
+    });
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Purchase failed.' };
+  }
 }
 
 /**
- * Restores previous purchases (required by App Store guidelines).
- *
- * TODO (billing sprint): Implement via react-native-purchases:
- *   const { customerInfo } = await Purchases.restorePurchases();
+ * Restores a previous purchase (required by App Store guidelines). Re-reads the
+ * Apple ID receipt via StoreKit; no account needed.
  */
 export async function restorePurchases(): Promise<PurchaseResult> {
-  // TODO: implement restore
-  console.warn('[Subscription] restorePurchases() is a stub.');
-  return {
-    success: false,
-    error: 'Restore not yet implemented.',
-  };
-}
-
-/**
- * Marks the user as subscribed in local storage.
- * Call this immediately after a successful StoreKit transaction to prevent
- * UI flicker while the backend validates the receipt.
- *
- * TODO (billing sprint): Remove optimistic update once server validation is live.
- */
-export async function optimisticallyMarkSubscribed(): Promise<void> {
-  await setPersistedSubscriptionStatus('subscribed');
-}
-
-/**
- * Clears the optimistic subscription flag (e.g. if server validation fails).
- */
-export async function clearOptimisticSubscription(): Promise<void> {
-  await setPersistedSubscriptionStatus('unknown');
+  if (!IAP) {
+    const active = (await getPersistedSubscriptionStatus()) === 'subscribed';
+    return active
+      ? { success: true }
+      : { success: false, error: 'No active subscription found for this Apple ID.' };
+  }
+  try {
+    await ensureConnection();
+    const active: boolean = await IAP.hasActiveSubscriptions(ALL_PRODUCT_IDS);
+    await setPersistedSubscriptionStatus(active ? 'subscribed' : 'unknown');
+    return active
+      ? { success: true }
+      : { success: false, error: 'No active subscription found for this Apple ID.' };
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Could not restore purchases.' };
+  }
 }
