@@ -175,11 +175,19 @@ export async function startPurchase(productId: ProductId): Promise<PurchaseResul
     // not blocked; once the products exist, the real purchase below runs.
     const products = await IAP.fetchProducts({ skus: [productId], type: 'subs' });
     if (!Array.isArray(products) || products.length === 0) {
-      console.warn(
-        `[Subscription] "${productId}" is not available from the App Store yet; granting access locally. Create the products in App Store Connect to enable real billing.`,
-      );
-      await setPersistedSubscriptionStatus('subscribed');
-      return { success: true };
+      // In a dev build the products may not be live in App Store Connect yet, so
+      // grant locally rather than locking the developer out while testing. In a
+      // production build we never hand out free access if the store is
+      // unreachable; the user simply tries again.
+      if (__DEV__) {
+        console.warn(`[Subscription] "${productId}" unavailable from the store; granting locally (dev build only).`);
+        await setPersistedSubscriptionStatus('subscribed');
+        return { success: true };
+      }
+      return {
+        success: false,
+        error: 'Subscriptions are temporarily unavailable. Please try again in a moment.',
+      };
     }
     return await new Promise<PurchaseResult>((resolve) => {
       pendingPurchase = resolve;
