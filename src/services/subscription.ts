@@ -74,8 +74,13 @@ let listenersBound = false;
 // A purchase is event-based: requestPurchase() kicks it off and the result
 // arrives on a listener. This resolver bridges that back to startPurchase().
 let pendingPurchase: ((result: PurchaseResult) => void) | null = null;
+let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function settlePurchase(result: PurchaseResult): void {
+  if (pendingTimeout) {
+    clearTimeout(pendingTimeout);
+    pendingTimeout = null;
+  }
   const resolve = pendingPurchase;
   pendingPurchase = null;
   resolve?.(result);
@@ -191,6 +196,12 @@ export async function startPurchase(productId: ProductId): Promise<PurchaseResul
     }
     return await new Promise<PurchaseResult>((resolve) => {
       pendingPurchase = resolve;
+      // StoreKit reports the outcome through the listeners, not this call's
+      // promise, so guard against a stuck "Processing" state if neither ever fires.
+      pendingTimeout = setTimeout(
+        () => settlePurchase({ success: false, error: 'The purchase did not complete. Please try again.' }),
+        90_000,
+      );
       IAP.requestPurchase({ request: { apple: { sku: productId } }, type: 'subs' }).catch(
         (e: any) => settlePurchase({ success: false, error: e?.message || 'Purchase failed.' }),
       );

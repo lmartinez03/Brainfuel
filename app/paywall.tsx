@@ -8,6 +8,7 @@ import {
   StatusBar,
   BackHandler,
   Linking,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -80,8 +81,12 @@ export default function PaywallScreen() {
     const productId = selectedPlan === 'annual' ? PRODUCT_IDS.annual : PRODUCT_IDS.monthly;
     const result = await startPurchase(productId);
     setLoading(false);
-    if (result.success) enterApp();
-    // A real build surfaces result.error here on failure.
+    if (result.success) {
+      enterApp();
+    } else if (result.error) {
+      // A user cancel comes back with no error, so only surface real failures.
+      Alert.alert('Purchase unavailable', result.error);
+    }
   };
 
   const handleRestore = async () => {
