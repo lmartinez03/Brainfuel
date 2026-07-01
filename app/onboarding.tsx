@@ -24,6 +24,7 @@ import {
   Mascot,
 } from '../src/ui';
 import type { Expr } from '../src/ui';
+import { SUBSCRIPTION_ENABLED } from '../src/config/featureFlags';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -85,9 +86,9 @@ export default function Onboarding() {
 
   const handleComplete = async () => {
     await AsyncStorage.setItem('brainfuel_onboarded', 'true');
-    // A subscription is mandatory, so onboarding leads into the paywall. The
-    // entry screen sends already-subscribed users straight to the tabs.
-    router.replace('/paywall');
+    // When the paywall is on, onboarding leads into it; when off (free launch),
+    // it leads straight into the app.
+    router.replace(SUBSCRIPTION_ENABLED ? '/paywall' : '/(tabs)');
   };
 
   const isLast = currentIdx === SLIDES.length - 1;

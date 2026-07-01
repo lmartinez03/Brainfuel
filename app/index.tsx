@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { colors, fonts, Mascot } from '../src/ui';
 import { hasActiveSubscription } from '../src/services/subscription';
+import { SUBSCRIPTION_ENABLED } from '../src/config/featureFlags';
 
 export default function AppEntry() {
   const router = useRouter();
@@ -15,10 +16,15 @@ export default function AppEntry() {
         router.replace('/onboarding');
         return;
       }
-      // A subscription is mandatory: without one, the paywall stands in for the
-      // app until the user subscribes (or restores a purchase).
-      const subscribed = await hasActiveSubscription();
-      router.replace(subscribed ? '/(tabs)' : '/paywall');
+      // When the paywall is off (launch state) the app is free, so everyone goes
+      // straight in. When on, an active subscription is required or the paywall
+      // stands in for the app until they subscribe (or restore a purchase).
+      if (SUBSCRIPTION_ENABLED) {
+        const subscribed = await hasActiveSubscription();
+        router.replace(subscribed ? '/(tabs)' : '/paywall');
+      } else {
+        router.replace('/(tabs)');
+      }
     };
     // Small delay so fonts load
     const t = setTimeout(check, 100);

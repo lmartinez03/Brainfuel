@@ -28,7 +28,7 @@ import {
   Mascot,
 } from '../../src/ui';
 import { getSettings, brainLevel, UserSettings } from '../../src/services/storage';
-import { ECONOMY_ENABLED, BADGES_ENABLED } from '../../src/config/featureFlags';
+import { ECONOMY_ENABLED, BADGES_ENABLED, SUBSCRIPTION_ENABLED } from '../../src/config/featureFlags';
 import { getNotificationStatus, ensureNotificationPermission } from '../../src/services/notifications';
 import { restorePurchases } from '../../src/services/subscription';
 import { LEGAL_URLS } from '../../src/config/legal';
@@ -204,18 +204,20 @@ export default function YouScreen() {
             onPress={handleNotifications}
           />
 
-          {/* Subscription */}
-          <SettingsRow
-            label="Brainfuel Pro"
-            sub="Manage subscription"
-            onPress={() => router.push('/paywall')}
-          />
-
-          {/* Restore purchases */}
-          <SettingsRow
-            label="Restore purchases"
-            onPress={handleRestorePurchases}
-          />
+          {/* Subscription rows, hidden while the app is free (SUBSCRIPTION_ENABLED). */}
+          {SUBSCRIPTION_ENABLED && (
+            <>
+              <SettingsRow
+                label="Brainfuel Pro"
+                sub="Manage subscription"
+                onPress={() => router.push('/paywall')}
+              />
+              <SettingsRow
+                label="Restore purchases"
+                onPress={handleRestorePurchases}
+              />
+            </>
+          )}
 
           {/* Privacy */}
           <SettingsRow
